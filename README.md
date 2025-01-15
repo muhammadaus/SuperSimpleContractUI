@@ -26,7 +26,7 @@ This repo uses the same format as Scaffold-ETH 2, you can find similar steps bel
 
 ```
 git clone https://github.com/muhammadaus/PureContracts.git
-cd ShortcutSC
+cd PureContracts
 yarn install
 ```
 
