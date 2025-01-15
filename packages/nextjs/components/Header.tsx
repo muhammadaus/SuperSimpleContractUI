@@ -20,6 +20,13 @@ const PlayIcon = ({ className = "" }) => (
   </svg>
 );
 
+const isActive = (pathname: string, href: string) => pathname === href;
+
+const baseLink = `hover:bg-gray-800 hover:shadow-lg transition-all duration-200
+  py-1.5 px-3 text-sm rounded-xl gap-2 grid grid-flow-col
+  text-gray-300 hover:text-white`;
+
+const activeLink = `bg-gray-800 shadow-lg ${baseLink}`;
 
 export const menuLinks: HeaderMenuLink[] = [
   {
@@ -31,29 +38,26 @@ export const menuLinks: HeaderMenuLink[] = [
     href: "/readwrite",
     icon: <PencilIcon className="h-4 w-4" />,
   },
+  {
+    label: "ERC20",
+    href: "/erc20",
+  },
 ];
 
 export const HeaderMenuLinks = () => {
-
   const pathname = usePathname();
 
   return (
     <nav>
       <ul>
         {menuLinks.map(({ label, href, icon }) => {
-          const isActive = pathname === href;
+          const active = isActive(pathname, href);
           return (
             <li key={href}>
               <Link
                 href={href}
                 passHref
-                className={`${
-                  isActive 
-                    ? "bg-gray-800 shadow-lg" 
-                    : ""
-                } hover:bg-gray-800 hover:shadow-lg transition-all duration-200
-                  py-1.5 px-3 text-sm rounded-xl gap-2 grid grid-flow-col
-                  text-gray-300 hover:text-white`}
+                className={active ? activeLink : baseLink}
               >
                 {icon}
                 <span>{label}</span>
@@ -73,6 +77,8 @@ export const Header = () => {
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const burgerMenuRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+
   useOutsideClick(
     burgerMenuRef,
     useCallback(() => setIsDrawerOpen(false), []),

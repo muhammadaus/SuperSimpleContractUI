@@ -12,6 +12,7 @@ import { updateTargetNetworks } from '~~/scaffold.config';
 import { Chain } from 'viem/chains';
 import { Address } from "viem";
 import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
+import { useRouter } from 'next/navigation';
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof import('viem/chains');
@@ -23,6 +24,7 @@ interface ChainOption {
 }
 
 const Home: NextPage = () => {
+  const router = useRouter();
   const [address, setAddress] = useState('');
   const [abi, setAbi] = useState('');
   const [isAddressEmpty, setIsAddressEmpty] = useState(true);
@@ -35,6 +37,7 @@ const Home: NextPage = () => {
   const [isContractLoaded, setIsContractLoaded] = useState(false);
   const [isValidAddress, setIsValidAddress] = useState(false);
   const [isValidAbi, setIsValidAbi] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const options: ChainOption[] = Object.keys(viemChains).map(chain => ({ 
     value: chain as ChainName, 
@@ -69,11 +72,32 @@ const Home: NextPage = () => {
     }
   };
 
+  const isERC20Contract = (abi: any[]) => {
+    const requiredMethods = [
+      'transfer',
+      'balanceOf',
+      'totalSupply',
+      'approve',
+      'allowance'
+    ];
+    
+    const abiMethods = abi
+      .filter(item => item.type === 'function')
+      .map(item => item.name);
+    
+    return requiredMethods.every(method => 
+      abiMethods.includes(method)
+    );
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
       return;
     }
+
+    // Start loading
+    setIsLoading(true);
 
     let parsedAbi;
     try {
@@ -81,6 +105,7 @@ const Home: NextPage = () => {
     } catch (error) {
       console.error('Invalid ABI:', error);
       setIsAbiInvalid(true);
+      setIsLoading(false); // Stop loading on error
       return;
     }
 
@@ -97,10 +122,20 @@ const Home: NextPage = () => {
     };
 
     try {
-      setContracts(contractUpdate);
+      await setContracts(contractUpdate);
       setIsContractLoaded(true);
+
+      // Add a small delay to show the loading state
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (isERC20Contract(parsedAbi)) {
+        router.push('/erc20');
+      } else {
+        router.push('/readwrite');
+      }
     } catch (error) {
       console.error('Error updating contracts:', error);
+      setIsLoading(false); // Stop loading on error
     }
   };
 
@@ -195,15 +230,43 @@ const Home: NextPage = () => {
 
       <button
         onClick={handleReadWrite}
-        disabled={!isValidAddress || !isValidAbi || !address || !abi}
-        className={`my-4 px-6 py-3 rounded-xl shadow-lg transition-all duration-200
-          ${(!isValidAddress || !isValidAbi || !address || !abi)
+        disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
+        className={`my-4 px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+          ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
             ? 'bg-gray-700 cursor-not-allowed text-gray-400'
             : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
           } font-medium`}
       >
-        Load Contract
+        <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
+          Load Contract
+        </span>
+        
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex gap-1">
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+          </div>
+        )}
       </button>
+
+      {/* Optional: Add a loading overlay for the entire page */}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-900 p-6 rounded-xl shadow-xl border border-gray-800">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+              <p className="text-white">Loading Contract Interface...</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
