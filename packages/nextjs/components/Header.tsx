@@ -12,6 +12,12 @@ type HeaderMenuLink = {
   label: string;
   href: string;
   icon?: React.ReactNode;
+  subLinks?: {
+    label: string;
+    href: string;
+    description?: string;
+    disabled?: boolean;
+  }[];
 };
 
 const PlayIcon = ({ className = "" }) => (
@@ -37,10 +43,30 @@ export const menuLinks: HeaderMenuLink[] = [
     label: "ReadWrite Contracts",
     href: "/readwrite",
     icon: <PencilIcon className="h-4 w-4" />,
-  },
-  {
-    label: "ERC20",
-    href: "/erc20",
+    subLinks: [
+      {
+        label: "ERC20 Token",
+        href: "/erc20",
+        description: "Standard Token Interface",
+      },
+      {
+        label: "ERC721 NFT",
+        href: "#",
+        description: "Coming Soon - NFT Standard",
+        disabled: true,
+      },
+      {
+        label: "ERC1155 Multi-Token",
+        href: "#",
+        description: "Coming Soon - Multi-Token Standard",
+        disabled: true,
+      },
+      {
+        label: "Custom Contract",
+        href: "/readwrite",
+        description: "Generic Contract Interface",
+      },
+    ],
   },
 ];
 
@@ -49,11 +75,11 @@ export const HeaderMenuLinks = () => {
 
   return (
     <nav>
-      <ul>
-        {menuLinks.map(({ label, href, icon }) => {
+      <ul className="flex gap-2">
+        {menuLinks.map(({ label, href, icon, subLinks }) => {
           const active = isActive(pathname, href);
           return (
-            <li key={href}>
+            <li key={href} className="relative group">
               <Link
                 href={href}
                 passHref
@@ -62,6 +88,36 @@ export const HeaderMenuLinks = () => {
                 {icon}
                 <span>{label}</span>
               </Link>
+              
+              {subLinks && (
+                <ul className="absolute left-0 mt-1 w-64 bg-gray-900 border border-gray-800 rounded-xl 
+                  shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible 
+                  transition-all duration-200 z-50 py-2">
+                  {subLinks.map(subLink => (
+                    <li key={subLink.href}>
+                      {!subLink.disabled ? (
+                        <Link
+                          href={subLink.href}
+                          className={`block px-4 py-2 text-sm hover:bg-gray-800 transition-colors
+                            ${isActive(pathname, subLink.href) ? 'bg-gray-800' : ''}`}
+                        >
+                          <div className="text-gray-200 font-medium">{subLink.label}</div>
+                          {subLink.description && (
+                            <div className="text-xs text-gray-400">{subLink.description}</div>
+                          )}
+                        </Link>
+                      ) : (
+                        <div className="px-4 py-2 text-sm cursor-not-allowed opacity-50">
+                          <div className="text-gray-400 font-medium">{subLink.label}</div>
+                          {subLink.description && (
+                            <div className="text-xs text-gray-500">{subLink.description}</div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           );
         })}
