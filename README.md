@@ -25,7 +25,7 @@ This repo uses the same format as Scaffold-ETH 2, you can find similar steps bel
 1. Clone this repo & install dependencies
 
 ```
-git clone https://github.com/muhammadaus/ShortcutSC.git
+git clone https://github.com/muhammadaus/PureContracts.git
 cd ShortcutSC
 yarn install
 ```
