@@ -125,7 +125,6 @@ const Home: NextPage = () => {
     let parsedAbi;
     try {
       parsedAbi = JSON.parse(abi);
-      console.log("Parsed ABI:", parsedAbi);
     } catch (error) {
       console.error('Invalid ABI:', error);
       setIsAbiInvalid(true);
@@ -135,8 +134,35 @@ const Home: NextPage = () => {
 
     const formattedAddress = address as `0x${string}`;
     
-    // Try to read token name before proceeding
     try {
+      // Check if it's a Universal Router by looking for specific functions
+      const isUniversalRouter = parsedAbi.some(
+        (item: any) => 
+          item.type === 'function' && 
+          item.name === 'execute' &&
+          item.inputs.some((input: any) => input.type === 'bytes')
+      );
+
+      if (isUniversalRouter) {
+        console.log("Detected Universal Router");
+        const contractUpdate: GenericContractsDeclaration = {
+          [(viemChains as any)[selectedNetwork.value].id]: {
+            YourContract: {
+              address: formattedAddress,
+              abi: parsedAbi,
+              inheritedFunctions: {}
+            }
+          }
+        };
+
+        setContracts(contractUpdate);
+        console.log("Contracts set successfully");
+        setIsContractLoaded(true);
+        router.push('/swap');
+        return;
+      }
+
+      // Try to read token name for ERC20/ERC721
       const client = createPublicClient({
         chain: (viemChains as any)[selectedNetwork.value],
         transport: http(),
@@ -149,7 +175,6 @@ const Home: NextPage = () => {
       });
       console.log("Detected Token Name:", name);
 
-      // Verify the contract update data
       const contractUpdate: GenericContractsDeclaration = {
         [(viemChains as any)[selectedNetwork.value].id]: {
           YourContract: {
@@ -159,16 +184,10 @@ const Home: NextPage = () => {
           }
         }
       };
-      console.log("Contract Update Data:", contractUpdate);
 
       setContracts(contractUpdate);
       console.log("Contracts set successfully");
-      console.log("Current contracts in store:", useContractStore.getState().contracts);
-      
       setIsContractLoaded(true);
-
-      // Add a small delay to show the loading state
-      await new Promise(resolve => setTimeout(resolve, 500));
 
       if (isERC20Contract(parsedAbi)) {
         router.push('/erc20');

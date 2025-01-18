@@ -55,10 +55,9 @@ export const menuLinks: HeaderMenuLink[] = [
         description: "NFT Standard Interface",
       },
       {
-        label: "ERC1155 Multi-Token",
-        href: "#",
-        description: "Coming Soon - Multi-Token Standard",
-        disabled: true,
+        label: "Swap ERC20",
+        href: "/swap",
+        description: "Swap ERC20 tokens",
       },
       {
         label: "Custom Contract",

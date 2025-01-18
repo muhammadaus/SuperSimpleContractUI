@@ -88,4 +88,3 @@ export function getBlockExplorerTxLink(chain: chains.Chain, txnHash: string) {
   }
   return `${blockExplorerBaseURL}/tx/${txnHash}`;
 }
-
