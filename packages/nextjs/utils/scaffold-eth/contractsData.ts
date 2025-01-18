@@ -1,18 +1,19 @@
-import { ContractData } from "./contract";
+import { Contract } from "./contract";
 import scaffoldConfig from "~~/scaffold.config";
-import { contracts } from "~~/utils/scaffold-eth/contract";
+import { contracts, useContractStore } from "~~/utils/scaffold-eth/contract";
+import { getAllTargetNetworks } from "./networks";
 
+// Update the interface to match the contract structure
 interface ContractData {
-  external?: boolean;
+  address: string;
+  abi: any[];
+  inheritedFunctions: Record<string, string>;
 }
 
 export function getAllContracts(): Record<string, ContractData> {
-  let allContractsData: Record<string, ContractData> = {};
-  const contractsData = contracts?.[scaffoldConfig.targetNetwork.id];
-  if (contractsData) {
-    allContractsData = { ...allContractsData, ...contractsData };
-  }
-  return allContractsData;
+  // Get contracts directly from the store instead of the imported contracts
+  const contractStore = useContractStore.getState();
+  return contractStore.contracts || {};
 }
 
 export function getContract(contractName: string): ContractData | null {
@@ -21,8 +22,7 @@ export function getContract(contractName: string): ContractData | null {
 }
 
 export function getTargetNetwork(): any {
-  // Check if targetNetworks is an array and get the first network, or use the single network
-  return Array.isArray(scaffoldConfig.targetNetworks) 
-    ? scaffoldConfig.targetNetworks[0] 
-    : scaffoldConfig.targetNetworks;
+  return Array.isArray(scaffoldConfig.targetNetwork) 
+    ? scaffoldConfig.targetNetwork[0] 
+    : scaffoldConfig.targetNetwork;
 }

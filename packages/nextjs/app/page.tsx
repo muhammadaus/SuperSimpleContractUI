@@ -13,9 +13,9 @@ import { Chain } from 'viem/chains';
 import { Address } from "viem";
 import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 import { useRouter } from 'next/navigation';
-import { createPublicClient, http } from 'viem';
 import { useContractStore } from "~~/utils/scaffold-eth/contract";
 import { setTargetNetwork } from "~~/utils/scaffold-eth/networks";
+import { getAllContracts } from "~~/utils/scaffold-eth/contractsData";
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof import('viem/chains');
@@ -75,8 +75,6 @@ const Home: NextPage = () => {
       setTargetNetwork(newNetwork);
     }
   };
-
-  
 
   const isERC20Contract = (abi: any[]) => {
     const requiredMethods = [
@@ -143,41 +141,13 @@ const Home: NextPage = () => {
           item.inputs.some((input: any) => input.type === 'bytes')
       );
 
-      if (isUniversalRouter) {
-        console.log("Detected Universal Router");
-        const contractUpdate: GenericContractsDeclaration = {
-          [(viemChains as any)[selectedNetwork.value].id]: {
-            YourContract: {
-              address: formattedAddress,
-              abi: parsedAbi,
-              inheritedFunctions: {}
-            }
-          }
-        };
-
-        setContracts(contractUpdate);
-        console.log("Contracts set successfully");
-        setIsContractLoaded(true);
-        router.push('/swap');
-        return;
-      }
-
-      // Try to read token name for ERC20/ERC721
-      const client = createPublicClient({
-        chain: (viemChains as any)[selectedNetwork.value],
-        transport: http(),
-      });
-
-      const name = await client.readContract({
-        address: formattedAddress,
-        abi: parsedAbi,
-        functionName: 'name',
-      });
-      console.log("Detected Token Name:", name);
-
+      const networkId = (viemChains as any)[selectedNetwork.value].id;
+      
+      // Create the contract update with the same name as used in useDeployedContractInfo
       const contractUpdate: GenericContractsDeclaration = {
-        [(viemChains as any)[selectedNetwork.value].id]: {
-          YourContract: {
+        [networkId]: {
+          // Use the same name as in useDeployedContractInfo
+          "YourContract": {
             address: formattedAddress,
             abi: parsedAbi,
             inheritedFunctions: {}
@@ -185,19 +155,51 @@ const Home: NextPage = () => {
         }
       };
 
-      setContracts(contractUpdate);
-      console.log("Contracts set successfully");
+      console.log("Setting contract with data:", contractUpdate);
+      
+      // Set the contracts
+      await setContracts(contractUpdate);
+      
+      // Verify the contract was set
+      const contractStore = useContractStore.getState();
+      console.log("Contract store after update:", {
+        networkId,
+        contracts: contractStore.contracts,
+        hasContract: !!contractStore.contracts?.[networkId]?.["YourContract"]
+      });
+
+      // Wait a bit for the store to update
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify the contracts were set by checking getAllContracts
+      const allContracts = getAllContracts();
+      console.log("Current contracts:", allContracts);
+      
+      // Check if the contract was set for the current network
+      const networkContracts = allContracts[networkId];
+      if (!networkContracts?.YourContract) {
+        throw new Error("Contract not set properly for the selected network");
+      }
+      
+      console.log("Contract set successfully:", networkContracts);
       setIsContractLoaded(true);
 
-      if (isERC20Contract(parsedAbi)) {
+      // Route based on contract type
+      if (isUniversalRouter) {
+        router.push('/swap');
+      } else if (isERC20Contract(parsedAbi)) {
         router.push('/erc20');
       } else if (isERC721Contract(parsedAbi)) {
         router.push('/nft');
       } else {
         router.push('/readwrite');
       }
+
     } catch (error) {
       console.error('Error:', error);
+      // Add user feedback for the error
+      alert('Error setting contract: ' + (error as Error).message);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -335,4 +337,3 @@ const Home: NextPage = () => {
 };
 
 export default Home;
-

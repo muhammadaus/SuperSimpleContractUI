@@ -5,16 +5,13 @@ import React, { useReducer } from "react";
 import { ContractReadMethods } from "./ContractReadMethods";
 import { ContractVariables } from "./ContractVariables";
 import { ContractWriteMethods } from "./ContractWriteMethods";
+import { FunctionForm } from "./FunctionForm";
 import { Address, Balance } from "~~/components/scaffold-eth";
 import { useDeployedContractInfo, useNetworkColor } from "~~/hooks/scaffold-eth";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { ContractName } from "~~/utils/scaffold-eth/contract";
 import { isAddress } from "viem";
-
-type ContractUIProps = {
-  contractName: ContractName;
-  className?: string;
-};
+import { useContractStore } from "~~/utils/scaffold-eth/contract";
 
 /**
  * UI component to interface with deployed contracts.
@@ -22,8 +19,25 @@ type ContractUIProps = {
 export const ContractUI = ({ contractName, className = "" }: ContractUIProps) => {
   const [refreshDisplayVariables, triggerRefreshDisplayVariables] = useReducer(value => !value, false);
   const { targetNetwork } = useTargetNetwork();
-  const { data: deployedContractData, isLoading: deployedContractLoading } = useDeployedContractInfo(contractName);
+  const contractStore = useContractStore();
+  
+  console.log("ContractUI Store State:", {
+    networkId: targetNetwork.id,
+    contracts: contractStore.contracts,
+    networkContracts: contractStore.contracts?.[targetNetwork.id],
+    hasYourContract: !!contractStore.contracts?.[targetNetwork.id]?.["YourContract"]
+  });
+
+  const { data: deployedContractData, isLoading: deployedContractLoading } = useDeployedContractInfo("YourContract");
   const networkColor = useNetworkColor();
+
+  // Add debug logs
+  console.log("Contract Data:", {
+    targetNetwork,
+    deployedContractData,
+    isLoading: deployedContractLoading,
+    status: deployedContractData ? 'Found' : 'Not Found'
+  });
 
   if (deployedContractLoading) {
     return (
@@ -36,14 +50,10 @@ export const ContractUI = ({ contractName, className = "" }: ContractUIProps) =>
   if (!deployedContractData) {
     return (
       <p className="text-3xl mt-14 text-gray-300">
-        {`No contract found by the name of "${contractName}" on chain "${targetNetwork.name}"!`}
+        {`No contract found on chain "${targetNetwork.name}"!`}
       </p>
     );
   }
-
-  // Validate the address format
-  const isValidAddressFlag = isAddress(deployedContractData.address);
-  const formattedAddress = isValidAddressFlag ? deployedContractData.address as `0x${string}` : "0x0000000000000000000000000000000000000000";
 
   return (
     <div className={`grid grid-cols-1 lg:grid-cols-6 px-6 lg:px-10 lg:gap-12 w-full max-w-7xl my-0 ${className}`}>
@@ -55,10 +65,10 @@ export const ContractUI = ({ contractName, className = "" }: ContractUIProps) =>
             <div className="flex">
               <div className="flex flex-col gap-1">
                 <span className="font-bold text-gray-200">{contractName}</span>
-                <Address address={formattedAddress} /> {/* Type Assertion Applied */}
+                <Address address={deployedContractData.address} />
                 <div className="flex gap-1 items-center">
                   <span className="font-bold text-sm text-gray-300">Balance:</span>
-                  <Balance address={formattedAddress} className="px-0 h-1.5 min-h-[0.375rem]" />
+                  <Balance address={deployedContractData.address} className="px-0 h-1.5 min-h-[0.375rem]" />
                 </div>
               </div>
             </div>
