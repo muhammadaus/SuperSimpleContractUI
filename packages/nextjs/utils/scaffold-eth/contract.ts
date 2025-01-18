@@ -27,6 +27,8 @@ import { WriteContractVariables } from "wagmi/query";
 import deployedContractsData from "~~/contracts/deployedContracts";
 import externalContractsData from "~~/contracts/externalContracts";
 import scaffoldConfig from "~~/scaffold.config";
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 type AddExternalFlag<T> = {
   [ChainId in keyof T]: {
@@ -73,11 +75,29 @@ export type GenericContractsDeclaration = {
   };
 };
 
-export let contracts = contractsData as GenericContractsDeclaration | null;
+interface ContractStore {
+  contracts: GenericContractsDeclaration | null;
+  setContracts: (newContracts: GenericContractsDeclaration | null) => void;
+}
 
-// Setter function to update `contracts`
+export const useContractStore = create<ContractStore>()(
+  persist(
+    (set) => ({
+      contracts: null,
+      setContracts: (newContracts) => set({ contracts: newContracts }),
+    }),
+    {
+      name: 'contract-storage', // unique name for localStorage
+    }
+  )
+);
+
+// Update the contracts getter
+export const getContracts = () => useContractStore.getState().contracts;
+
+// Update the setter function
 export function setContracts(newContracts: GenericContractsDeclaration | null): void {
-    contracts = newContracts;
+  useContractStore.getState().setContracts(newContracts);
 }
 
 type ConfiguredChainId = (typeof scaffoldConfig)["targetNetworks"][0]["id"];

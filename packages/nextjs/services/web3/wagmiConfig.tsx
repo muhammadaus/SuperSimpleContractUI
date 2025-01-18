@@ -3,63 +3,42 @@ import { Chain, createClient, http } from "viem";
 import { hardhat, mainnet } from "viem/chains";
 import { createConfig } from "wagmi";
 import scaffoldConfig from "~~/scaffold.config";
-import { getAlchemyHttpUrl } from "~~/utils/scaffold-eth";
+import { getAlchemyHttpUrl, getTargetNetwork } from "~~/utils/scaffold-eth";
 import * as chains from "viem/chains";
 
-const { targetNetworks } = scaffoldConfig;
-
-const allChainsFormatted = Object.values(chains).map(chain => ({
-  id: chain.id,
-  name: chain.name,
-  nativeCurrency: {
-      name: chain.nativeCurrency.name,
-      symbol: chain.nativeCurrency.symbol,
-      decimals: chain.nativeCurrency.decimals,
-  },
-  rpcUrls: {
-      default: {
-          http: chain.rpcUrls.default,
-      },
-  },
-  blockExplorers: chain.blockExplorers ? {
-      default: {
-          name: chain.blockExplorers.default.name,
-          url: chain.blockExplorers.default.url,
-          apiUrl: (chain.blockExplorers.default as { apiUrl: string }).apiUrl,
-      },
-  } : undefined,
-  contracts: chain.contracts ? Object.keys(chain.contracts).reduce((acc, key) => {
-      acc[key] = {
-          address: chain.contracts[key].address,
-          blockCreated: chain.contracts[key].blockCreated,
-      };
-      return acc;
-  }, {} as Record<string, { address: string; blockCreated: number }>) : undefined,
-  testnet: chain.testnet,
-}));
+const targetNetwork = getTargetNetwork();
 
 // We always want to have mainnet enabled (ENS resolution, ETH price, etc). But only once.
-export const enabledChains = targetNetworks.find((network: Chain) => network.id === 1)
-  ? targetNetworks
-  : ([...targetNetworks, mainnet] as const);
+const enabledChains = targetNetwork.id === mainnet.id 
+  ? [targetNetwork] 
+  : [targetNetwork, mainnet] as const;
 
+// Create transport configuration for each chain
+const transports = Object.fromEntries(
+  enabledChains.map(chain => [
+    chain.id,
+    http(
+      getAlchemyHttpUrl(chain.id) || 
+      chain.rpcUrls.default.http[0]
+    )
+  ])
+);
+
+/**
+ * Wagmi config
+ */
 export const wagmiConfig = createConfig({
-  chains: allChainsFormatted,
+  chains: enabledChains,
   connectors: wagmiConnectors,
-  ssr: true,
-  client({ chain }) {
-    console.log(scaffoldConfig.pollingInterval);
-    return createClient({
-      chain,
-      transport: http(
-        getAlchemyHttpUrl(chain.id) || 
-        chain.rpcUrls.default.http[0]
-      ),
-      ...(chain.id !== (hardhat as Chain).id
-        ? {
-            pollingInterval: scaffoldConfig.pollingInterval,
-          }
-        : {}),
-    });
-  },
+  transports,
+  pollingInterval: scaffoldConfig.pollingInterval,
+});
+
+// Create a public client for general use
+export const publicClient = createClient({
+  chain: targetNetwork,
+  transport: http(
+    getAlchemyHttpUrl(targetNetwork.id) || 
+    targetNetwork.rpcUrls.default.http[0]
+  ),
 });

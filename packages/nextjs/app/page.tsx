@@ -13,6 +13,9 @@ import { Chain } from 'viem/chains';
 import { Address } from "viem";
 import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 import { useRouter } from 'next/navigation';
+import { createPublicClient, http } from 'viem';
+import { useContractStore } from "~~/utils/scaffold-eth/contract";
+import { setTargetNetwork } from "~~/utils/scaffold-eth/networks";
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof import('viem/chains');
@@ -68,9 +71,12 @@ const Home: NextPage = () => {
   const handleNetworkChange = (selected: SingleValue<ChainOption>) => {
     if (selected) {
       setSelectedNetwork(selected);
-      updateTargetNetworks(selected.value);
+      const newNetwork = (viemChains as any)[selected.value];
+      setTargetNetwork(newNetwork);
     }
   };
+
+  
 
   const isERC20Contract = (abi: any[]) => {
     const requiredMethods = [
@@ -90,39 +96,75 @@ const Home: NextPage = () => {
     );
   };
 
+  const isERC721Contract = (abi: any[]) => {
+    const requiredMethods = [
+      'balanceOf',
+      'ownerOf',
+      'transferFrom',
+      'approve',
+      'setApprovalForAll'
+    ];
+    
+    const abiMethods = abi
+      .filter(item => item.type === 'function')
+      .map(item => item.name);
+    
+    return requiredMethods.every(method => 
+      abiMethods.includes(method)
+    );
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
       return;
     }
 
-    // Start loading
     setIsLoading(true);
 
     let parsedAbi;
     try {
       parsedAbi = JSON.parse(abi);
+      console.log("Parsed ABI:", parsedAbi);
     } catch (error) {
       console.error('Invalid ABI:', error);
       setIsAbiInvalid(true);
-      setIsLoading(false); // Stop loading on error
+      setIsLoading(false);
       return;
     }
 
     const formattedAddress = address as `0x${string}`;
     
-    const contractUpdate: GenericContractsDeclaration = {
-      [(viemChains as any)[selectedNetwork.value].id]: {
-        YourContract: {
-          address: formattedAddress,
-          abi: parsedAbi,
-          inheritedFunctions: {}
-        }
-      }
-    };
-
+    // Try to read token name before proceeding
     try {
-      await setContracts(contractUpdate);
+      const client = createPublicClient({
+        chain: (viemChains as any)[selectedNetwork.value],
+        transport: http(),
+      });
+
+      const name = await client.readContract({
+        address: formattedAddress,
+        abi: parsedAbi,
+        functionName: 'name',
+      });
+      console.log("Detected Token Name:", name);
+
+      // Verify the contract update data
+      const contractUpdate: GenericContractsDeclaration = {
+        [(viemChains as any)[selectedNetwork.value].id]: {
+          YourContract: {
+            address: formattedAddress,
+            abi: parsedAbi,
+            inheritedFunctions: {}
+          }
+        }
+      };
+      console.log("Contract Update Data:", contractUpdate);
+
+      setContracts(contractUpdate);
+      console.log("Contracts set successfully");
+      console.log("Current contracts in store:", useContractStore.getState().contracts);
+      
       setIsContractLoaded(true);
 
       // Add a small delay to show the loading state
@@ -130,12 +172,14 @@ const Home: NextPage = () => {
 
       if (isERC20Contract(parsedAbi)) {
         router.push('/erc20');
+      } else if (isERC721Contract(parsedAbi)) {
+        router.push('/nft');
       } else {
         router.push('/readwrite');
       }
     } catch (error) {
-      console.error('Error updating contracts:', error);
-      setIsLoading(false); // Stop loading on error
+      console.error('Error:', error);
+      setIsLoading(false);
     }
   };
 

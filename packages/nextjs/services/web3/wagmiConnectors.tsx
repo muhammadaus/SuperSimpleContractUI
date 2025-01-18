@@ -1,5 +1,6 @@
 import { connectorsForWallets } from "@rainbow-me/rainbowkit";
 import {
+  braveWallet,
   coinbaseWallet,
   ledgerWallet,
   metaMaskWallet,
@@ -7,23 +8,24 @@ import {
   safeWallet,
   walletConnectWallet,
 } from "@rainbow-me/rainbowkit/wallets";
-import { rainbowkitBurnerWallet } from "burner-connector";
-import * as chains from "viem/chains";
+import { createConfig, http } from "wagmi";
 import scaffoldConfig from "~~/scaffold.config";
+import { getTargetNetwork } from "~~/utils/scaffold-eth";
 
-const { onlyLocalBurnerWallet, targetNetworks } = scaffoldConfig;
+const targetNetwork = getTargetNetwork();
 
-const wallets = [
-  metaMaskWallet,
-  walletConnectWallet,
-  ledgerWallet,
-  coinbaseWallet,
-  rainbowWallet,
-  safeWallet,
-  ...(!targetNetworks.some(network => network.id !== (chains.hardhat as chains.Chain).id) || !onlyLocalBurnerWallet
-    ? [rainbowkitBurnerWallet]
-    : []),
-];
+// Create wagmi config
+export const config = createConfig({
+  chains: [targetNetwork],
+  transports: {
+    [targetNetwork.id]: http(
+      targetNetwork.rpcUrls.default.http[0],
+      {
+        apiKey: scaffoldConfig.alchemyApiKey,
+      }
+    ),
+  },
+});
 
 /**
  * wagmi connectors for the wagmi context
@@ -32,12 +34,20 @@ export const wagmiConnectors = connectorsForWallets(
   [
     {
       groupName: "Supported Wallets",
-      wallets,
+      wallets: [
+        metaMaskWallet,
+        walletConnectWallet,
+        ledgerWallet,
+        braveWallet,
+        coinbaseWallet,
+        rainbowWallet,
+        safeWallet,
+      ],
     },
   ],
-
   {
-    appName: "scaffold-eth-2",
+    appName: "Pure Contracts",
     projectId: scaffoldConfig.walletConnectProjectId,
+    chains: [targetNetwork],
   },
 );

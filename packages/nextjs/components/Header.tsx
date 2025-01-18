@@ -51,9 +51,8 @@ export const menuLinks: HeaderMenuLink[] = [
       },
       {
         label: "ERC721 NFT",
-        href: "#",
-        description: "Coming Soon - NFT Standard",
-        disabled: true,
+        href: "/nft",
+        description: "NFT Standard Interface",
       },
       {
         label: "ERC1155 Multi-Token",

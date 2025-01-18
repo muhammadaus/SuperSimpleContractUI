@@ -1,19 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { isAddress, formatEther, parseEther, createPublicClient, http } from 'viem';
+import { createPublicClient, http, isAddress } from 'viem';
 import { useAccount, useWriteContract } from 'wagmi';
 import { useTransactor } from '~~/hooks/scaffold-eth';
 import { useTargetNetwork } from '~~/hooks/scaffold-eth';
 import { useContractStore } from "~~/utils/scaffold-eth/contract";
 
-export default function ERC20() {
+export default function NFT() {
   const [tokenName, setTokenName] = useState<string>("");
   const [tokenSymbol, setTokenSymbol] = useState<string>("");
-  const [recipientAddress, setRecipientAddress] = useState('');
-  const [spenderAddress, setSpenderAddress] = useState('');
-  const [amount, setAmount] = useState('');
   const [userBalance, setUserBalance] = useState<bigint>(BigInt(0));
+  const [recipientAddress, setRecipientAddress] = useState('');
+  const [tokenId, setTokenId] = useState('');
+  const [approvedAddress, setApprovedAddress] = useState('');
 
   const { address: userAddress } = useAccount();
   const { targetNetwork } = useTargetNetwork();
@@ -23,7 +23,7 @@ export default function ERC20() {
   const contracts = useContractStore(state => state.contracts);
   const contractData = contracts?.[targetNetwork.id]?.YourContract;
 
-  // Write operations - moved before conditionals
+  // Write operations
   const { writeContractAsync: transferToken } = useWriteContract();
   const { writeContractAsync: approveToken } = useWriteContract();
 
@@ -74,21 +74,16 @@ export default function ERC20() {
     readTokenInfo();
   }, [contractData, targetNetwork, userAddress]);
 
-  // Show loading if contract data is not available
-  if (!contractData) {
-    return <div className="text-center mt-10">Loading contract data...</div>;
-  }
-
   const handleTransfer = async () => {
-    if (!isAddress(recipientAddress) || !amount || !transferToken || !contractData) return;
+    if (!isAddress(recipientAddress) || !tokenId || !transferToken || !contractData) return;
     
     try {
       const makeTransfer = () =>
         transferToken({
           address: contractData.address,
           abi: contractData.abi,
-          functionName: 'transfer',
-          args: [recipientAddress as `0x${string}`, parseEther(amount)],
+          functionName: 'transferFrom',
+          args: [userAddress, recipientAddress as `0x${string}`, BigInt(tokenId)],
         });
       
       await writeTxn(makeTransfer);
@@ -98,7 +93,7 @@ export default function ERC20() {
   };
 
   const handleApprove = async () => {
-    if (!isAddress(spenderAddress) || !amount || !approveToken || !contractData) return;
+    if (!isAddress(approvedAddress) || !tokenId || !approveToken || !contractData) return;
     
     try {
       const makeApprove = () =>
@@ -106,7 +101,7 @@ export default function ERC20() {
           address: contractData.address,
           abi: contractData.abi,
           functionName: 'approve',
-          args: [spenderAddress as `0x${string}`, parseEther(amount)],
+          args: [approvedAddress as `0x${string}`, BigInt(tokenId)],
         });
       
       await writeTxn(makeApprove);
@@ -114,6 +109,11 @@ export default function ERC20() {
       console.error('Approval failed:', error);
     }
   };
+
+  // Show loading if contract data is not available
+  if (!contractData) {
+    return <div className="text-center mt-10">Loading contract data...</div>;
+  }
 
   return (
     <div className="flex flex-col items-center flex-grow pt-10 px-4 w-full max-w-[600px] mx-auto">
@@ -126,12 +126,12 @@ export default function ERC20() {
 
       {/* Token Info */}
       <div className="w-full mb-8 p-4 rounded-xl bg-base-200">
-        <p>Your Balance: {formatEther(userBalance)} {tokenSymbol}</p>
+        <p>Your NFT Balance: {userBalance.toString()}</p>
       </div>
 
       {/* Transfer Section */}
       <div className="w-full mb-8 p-4 rounded-xl bg-base-200">
-        <h2 className="text-xl font-bold mb-4">Transfer Tokens</h2>
+        <h2 className="text-xl font-bold mb-4">Transfer NFT</h2>
         <input
           type="text"
           value={recipientAddress}
@@ -141,43 +141,43 @@ export default function ERC20() {
         />
         <input
           type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="Amount"
+          value={tokenId}
+          onChange={(e) => setTokenId(e.target.value)}
+          placeholder="Token ID"
           className="w-full p-3 rounded-xl mb-3 bg-base-100"
         />
         <button
           onClick={handleTransfer}
-          disabled={!isAddress(recipientAddress) || !amount}
+          disabled={!isAddress(recipientAddress) || !tokenId}
           className="btn btn-primary w-full"
         >
-          Transfer
+          Transfer NFT
         </button>
       </div>
 
       {/* Approve Section */}
       <div className="w-full mb-8 p-4 rounded-xl bg-base-200">
-        <h2 className="text-xl font-bold mb-4">Approve Spender</h2>
+        <h2 className="text-xl font-bold mb-4">Approve NFT</h2>
         <input
           type="text"
-          value={spenderAddress}
-          onChange={(e) => setSpenderAddress(e.target.value)}
-          placeholder="Spender address"
+          value={approvedAddress}
+          onChange={(e) => setApprovedAddress(e.target.value)}
+          placeholder="Approved address"
           className="w-full p-3 rounded-xl mb-3 bg-base-100"
         />
         <input
           type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="Amount"
+          value={tokenId}
+          onChange={(e) => setTokenId(e.target.value)}
+          placeholder="Token ID"
           className="w-full p-3 rounded-xl mb-3 bg-base-100"
         />
         <button
           onClick={handleApprove}
-          disabled={!isAddress(spenderAddress) || !amount}
+          disabled={!isAddress(approvedAddress) || !tokenId}
           className="btn btn-primary w-full"
         >
-          Approve
+          Approve NFT
         </button>
       </div>
     </div>
