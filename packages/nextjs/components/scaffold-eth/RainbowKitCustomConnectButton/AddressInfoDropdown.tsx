@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Address } from "viem";
 import { useChainId, useConfig } from "wagmi";
 import { getBlockExplorerAddressLink, getTargetNetwork } from "~~/utils/scaffold-eth";
+import { ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from "@heroicons/react/24/outline";
 
 const targetNetwork = getTargetNetwork();
 
@@ -48,7 +49,7 @@ export const AddressInfoDropdown = ({ address, displayName, ensAvatar }: Address
           className="text-sm text-gray-400 hover:text-gray-200 transition-colors"
           onClick={copyAddress}
         >
-          {addressCopied ? "Copied!" : address}
+          {addressCopied ? <ClipboardDocumentCheckIcon className="w-4 h-4" /> : <ClipboardDocumentIcon className="w-4 h-4" />}
         </button>
         {isTargetNetwork && (
           <a

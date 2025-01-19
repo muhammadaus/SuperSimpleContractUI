@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from "next/link";
 import type { NextPage } from "next";
 import { PencilIcon } from "@heroicons/react/24/outline";
@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useContractStore } from "~~/utils/scaffold-eth/contract";
 import { setTargetNetwork } from "~~/utils/scaffold-eth/networks";
 import { getAllContracts } from "~~/utils/scaffold-eth/contractsData";
+import * as wagmiChains from "wagmi/chains";
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof import('viem/chains');
@@ -41,6 +42,34 @@ const Home: NextPage = () => {
   const [isValidAddress, setIsValidAddress] = useState(false);
   const [isValidAbi, setIsValidAbi] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Get all chain information
+  const chainInfo = useMemo(() => {
+    const chains = Object.entries(wagmiChains)
+      .filter(([name, chain]) => 
+        typeof chain === 'object' && 
+        'id' in chain && 
+        'name' in chain
+      )
+      .map(([name, chain]) => ({
+        name,
+        id: chain.id,
+        displayName: chain.name,
+      }));
+
+    console.log("Available Wagmi Chains:", chains);
+    
+    // Create a mapping of chain IDs to names
+    const chainIdToName = Object.fromEntries(
+      chains.map(chain => [chain.id, chain.name])
+    );
+    console.log("Chain ID to Name mapping:", chainIdToName);
+
+    return {
+      chains,
+      chainIdToName,
+    };
+  }, []);
 
   const options: ChainOption[] = Object.keys(viemChains).map(chain => ({ 
     value: chain as ChainName, 
@@ -203,6 +232,9 @@ const Home: NextPage = () => {
       setIsLoading(false);
     }
   };
+
+  console.log("Chain Names:", chainInfo.chains.map(c => c.name));
+  console.log("Chain IDs:", chainInfo.chains.map(c => c.id));
 
   return (
     <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">

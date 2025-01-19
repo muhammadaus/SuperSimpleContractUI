@@ -1,21 +1,31 @@
 import { wagmiConnectors } from "./wagmiConnectors";
 import { Chain, createClient, http } from "viem";
-import { hardhat, mainnet } from "viem/chains";
+import { mainnet, polygon, optimism, arbitrum, base } from "wagmi/chains";
 import { createConfig } from "wagmi";
 import scaffoldConfig from "~~/scaffold.config";
 import { getAlchemyHttpUrl, getTargetNetwork } from "~~/utils/scaffold-eth";
-import * as chains from "viem/chains";
 
 const targetNetwork = getTargetNetwork();
 
-// We always want to have mainnet enabled (ENS resolution, ETH price, etc). But only once.
-const enabledChains = targetNetwork.id === mainnet.id 
-  ? [targetNetwork] 
-  : [targetNetwork, mainnet] as const;
+// Define supported chains explicitly for RainbowKit
+const supportedChains = [
+  mainnet,
+  polygon,
+  optimism,
+  arbitrum,
+  base,
+] as const;
 
-// Create transport configuration for each chain
+// Log chain information
+console.log("Supported Chains:", supportedChains.map(chain => ({
+  id: chain.id,
+  name: chain.name,
+  network: chain.network,
+})));
+
+// Create transport configuration for all supported chains
 const transports = Object.fromEntries(
-  enabledChains.map(chain => [
+  supportedChains.map(chain => [
     chain.id,
     http(
       getAlchemyHttpUrl(chain.id) || 
@@ -25,10 +35,10 @@ const transports = Object.fromEntries(
 );
 
 /**
- * Wagmi config
+ * Wagmi config with all supported chains
  */
 export const wagmiConfig = createConfig({
-  chains: enabledChains,
+  chains: supportedChains,
   connectors: wagmiConnectors,
   transports,
   pollingInterval: scaffoldConfig.pollingInterval,
