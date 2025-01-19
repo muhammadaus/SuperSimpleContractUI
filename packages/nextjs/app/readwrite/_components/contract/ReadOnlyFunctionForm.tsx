@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { InheritanceTooltip } from "./InheritanceTooltip";
 import { Abi, AbiFunction } from "abitype";
-import { Address } from "viem";
-import { useReadContract } from "wagmi";
+import { Address, createPublicClient, custom } from "viem";
+import { useWalletClient } from "wagmi";
 import {
   ContractInput,
   displayTxResult,
@@ -31,26 +31,43 @@ export const ReadOnlyFunctionForm = ({
 }: ReadOnlyFunctionFormProps) => {
   const [form, setForm] = useState<Record<string, any>>(() => getInitialFormState(abiFunction));
   const [result, setResult] = useState<unknown>();
-  const { targetNetwork } = useTargetNetwork();
+  const [isFetching, setIsFetching] = useState(false);
+  const { data: walletClient } = useWalletClient();
 
-  const { isFetching, refetch, error } = useReadContract({
-    address: contractAddress,
-    functionName: abiFunction.name,
-    abi: abi,
-    args: getParsedContractFunctionArgs(form),
-    chainId: targetNetwork.id,
-    query: {
-      enabled: false,
-      retry: false,
-    },
-  });
+  const parsedArgs = getParsedContractFunctionArgs(form);
 
-  useEffect(() => {
-    if (error) {
-      const parsedError = getParsedError(error);
-      notification.error(parsedError);
+  const handleRead = async () => {
+    if (!window.ethereum) {
+      notification.error("Please install MetaMask");
+      return;
     }
-  }, [error]);
+
+    try {
+      setIsFetching(true);
+      
+      // Create a client using the wallet's provider
+      const client = createPublicClient({
+        transport: custom(window.ethereum),
+      });
+
+      // Read directly using viem client
+      const data = await client.readContract({
+        address: contractAddress,
+        abi: abi,
+        functionName: abiFunction.name,
+        args: parsedArgs,
+      });
+
+      console.log('Read successful:', data);
+      setResult(data);
+    } catch (err) {
+      console.error('Read failed:', err);
+      const parsedError = getParsedError(err);
+      notification.error(parsedError);
+    } finally {
+      setIsFetching(false);
+    }
+  };
 
   const transformedFunction = transformAbiFunction(abiFunction);
   const inputElements = transformedFunction.inputs.map((input, inputIndex) => {
@@ -87,10 +104,7 @@ export const ReadOnlyFunctionForm = ({
         </div>
         <button
           className="btn btn-secondary btn-sm self-end md:self-start"
-          onClick={async () => {
-            const { data } = await refetch();
-            setResult(data);
-          }}
+          onClick={handleRead}
           disabled={isFetching}
         >
           {isFetching && <span className="loading loading-spinner loading-xs"></span>}

@@ -1,13 +1,9 @@
 import { createPublicClient, http } from "viem";
-import { mainnet } from "viem/chains";
-import { getAlchemyHttpUrl } from "~~/utils/scaffold-eth/networks";
-import scaffoldConfig from "~~/scaffold.config";
 
-// Create a public client
+// Create a public client that uses the connected wallet's provider
 export const publicClient = createPublicClient({
-  chain: mainnet,
-  transport: http(getAlchemyHttpUrl(mainnet.id)),
+  transport: http(),
 });
 
-// Export chain configuration
-export const defaultChain = mainnet; 
+// Let the connected wallet determine the chain
+export const defaultChain = undefined; 

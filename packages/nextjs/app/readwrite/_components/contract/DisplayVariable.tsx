@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { InheritanceTooltip } from "./InheritanceTooltip";
 import { displayTxResult } from "./utilsDisplay";
 import { Abi, AbiFunction } from "abitype";
-import { Address } from "viem";
-import { useReadContract } from "wagmi";
+import { Address, createPublicClient, custom } from "viem";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useAnimationConfig } from "~~/hooks/scaffold-eth";
-import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { getParsedError, notification } from "~~/utils/scaffold-eth";
 
 type DisplayVariableProps = {
@@ -26,41 +24,50 @@ export const DisplayVariable = ({
   abi,
   inheritedFrom,
 }: DisplayVariableProps) => {
-  const { targetNetwork } = useTargetNetwork();
-
-  const {
-    data: result,
-    isFetching,
-    refetch,
-    error,
-  } = useReadContract({
-    address: contractAddress,
-    functionName: abiFunction.name,
-    abi: abi,
-    chainId: targetNetwork.id,
-    query: {
-      retry: false,
-    },
-  });
-
+  const [result, setResult] = useState<unknown>();
+  const [isFetching, setIsFetching] = useState(false);
   const { showAnimation } = useAnimationConfig(result);
 
-  useEffect(() => {
-    refetch();
-  }, [refetch, refreshDisplayVariables]);
+  const readData = async () => {
+    if (!window.ethereum) {
+      notification.error("Please install MetaMask");
+      return;
+    }
+
+    try {
+      setIsFetching(true);
+      
+      // Create a client using the wallet's provider
+      const client = createPublicClient({
+        transport: custom(window.ethereum),
+      });
+
+      // Read directly using viem client
+      const data = await client.readContract({
+        address: contractAddress,
+        abi: abi,
+        functionName: abiFunction.name,
+      });
+
+      setResult(data);
+    } catch (err) {
+      console.error('Read failed:', err);
+      const parsedError = getParsedError(err);
+      notification.error(parsedError);
+    } finally {
+      setIsFetching(false);
+    }
+  };
 
   useEffect(() => {
-    if (error) {
-      const parsedError = getParsedError(error);
-      notification.error(parsedError);
-    }
-  }, [error]);
+    readData();
+  }, [refreshDisplayVariables]);
 
   return (
     <div className="space-y-1 pb-2">
       <div className="flex items-center">
         <h3 className="font-medium text-lg mb-0 break-all">{abiFunction.name}</h3>
-        <button className="btn btn-ghost btn-xs" onClick={async () => await refetch()}>
+        <button className="btn btn-ghost btn-xs" onClick={readData}>
           {isFetching ? (
             <span className="loading loading-spinner loading-xs"></span>
           ) : (

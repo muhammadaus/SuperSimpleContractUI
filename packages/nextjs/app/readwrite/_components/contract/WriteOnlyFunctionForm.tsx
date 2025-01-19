@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { InheritanceTooltip } from "./InheritanceTooltip";
 import { Abi, AbiFunction } from "abitype";
-import { Address, TransactionReceipt } from "viem";
-import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { Address, TransactionReceipt, createWalletClient, custom } from "viem";
+import { useAccount, useWaitForTransactionReceipt } from "wagmi";
 import {
   ContractInput,
   TxReceipt,
@@ -14,8 +14,8 @@ import {
   transformAbiFunction,
 } from "~~/app/readwrite/_components/contract";
 import { IntegerInput } from "~~/components/scaffold-eth";
-import { useTransactor } from "~~/hooks/scaffold-eth";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
+import { getParsedError, notification } from "~~/utils/scaffold-eth";
 
 type WriteOnlyFunctionFormProps = {
   abi: Abi;
@@ -34,36 +34,53 @@ export const WriteOnlyFunctionForm = ({
 }: WriteOnlyFunctionFormProps) => {
   const [form, setForm] = useState<Record<string, any>>(() => getInitialFormState(abiFunction));
   const [txValue, setTxValue] = useState<string | bigint>("");
+  const [isFetching, setIsFetching] = useState(false);
+  const [txHash, setTxHash] = useState<`0x${string}`>();
   const { chain } = useAccount();
-  const writeTxn = useTransactor();
   const { targetNetwork } = useTargetNetwork();
   const writeDisabled = !chain || chain?.id !== targetNetwork.id;
 
-  const { data: result, isPending, writeContractAsync } = useWriteContract();
-
   const handleWrite = async () => {
-    if (writeContractAsync) {
-      try {
-        const makeWriteWithParams = () =>
-          writeContractAsync({
-            address: contractAddress,
-            functionName: abiFunction.name,
-            abi: abi,
-            args: getParsedContractFunctionArgs(form),
-            value: BigInt(txValue),
-          });
-        await writeTxn(makeWriteWithParams);
-        onChange();
-      } catch (e: any) {
-        console.error("⚡️ ~ file: WriteOnlyFunctionForm.tsx:handleWrite ~ error", e);
-      }
+    if (!window.ethereum) {
+      notification.error("Please install MetaMask");
+      return;
+    }
+
+    try {
+      setIsFetching(true);
+      
+      // Create a wallet client for writing
+      const client = createWalletClient({
+        transport: custom(window.ethereum)
+      });
+
+      // Write using wallet client
+      const hash = await client.writeContract({
+        address: contractAddress,
+        abi: abi,
+        functionName: abiFunction.name,
+        args: getParsedContractFunctionArgs(form),
+        value: BigInt(txValue || 0),
+      });
+
+      console.log('Write successful:', hash);
+      setTxHash(hash);
+      onChange();
+
+    } catch (err) {
+      console.error('Write failed:', err);
+      const parsedError = getParsedError(err);
+      notification.error(parsedError);
+    } finally {
+      setIsFetching(false);
     }
   };
 
   const [displayedTxResult, setDisplayedTxResult] = useState<TransactionReceipt>();
   const { data: txResult } = useWaitForTransactionReceipt({
-    hash: result,
+    hash: txHash,
   });
+
   useEffect(() => {
     setDisplayedTxResult(txResult);
   }, [txResult]);
@@ -124,8 +141,12 @@ export const WriteOnlyFunctionForm = ({
             }`}
             data-tip={`${writeDisabled && "Wallet not connected or in the wrong network"}`}
           >
-            <button className="btn btn-secondary btn-sm" disabled={writeDisabled || isPending} onClick={handleWrite}>
-              {isPending && <span className="loading loading-spinner loading-xs"></span>}
+            <button 
+              className="btn btn-secondary btn-sm" 
+              disabled={writeDisabled || isFetching} 
+              onClick={handleWrite}
+            >
+              {isFetching && <span className="loading loading-spinner loading-xs"></span>}
               Write 🖊️
             </button>
           </div>
