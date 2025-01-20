@@ -141,6 +141,30 @@ const Home: NextPage = () => {
     );
   };
 
+  const isBridgeContract = (abi: any[]) => {
+    // Check for common bridge functions and events
+    const bridgeIndicators = [
+      'relayMessage',
+      'relayTokens',
+      'l2GasPrice',
+      'l1Inbox',
+      'MessageRelayed',
+      'TokensRelayed'
+    ];
+    
+    const abiElements = abi.map(item => 
+      item.type === 'function' || item.type === 'event' ? item.name : ''
+    );
+    
+    // If the ABI contains several of these indicators, it's likely a bridge
+    const matchCount = bridgeIndicators.filter(indicator => 
+      abiElements.includes(indicator)
+    ).length;
+
+    // Consider it a bridge if it matches 3 or more indicators
+    return matchCount >= 3;
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
@@ -162,7 +186,7 @@ const Home: NextPage = () => {
     const formattedAddress = address as `0x${string}`;
     
     try {
-      // Check if it's a Universal Router by looking for specific functions
+      // Check contract type
       const isUniversalRouter = parsedAbi.some(
         (item: any) => 
           item.type === 'function' && 
@@ -170,12 +194,12 @@ const Home: NextPage = () => {
           item.inputs.some((input: any) => input.type === 'bytes')
       );
 
+      const isBridge = isBridgeContract(parsedAbi);
+
       const networkId = (viemChains as any)[selectedNetwork.value].id;
       
-      // Create the contract update with the same name as used in useDeployedContractInfo
       const contractUpdate: GenericContractsDeclaration = {
         [networkId]: {
-          // Use the same name as in useDeployedContractInfo
           "YourContract": {
             address: formattedAddress,
             abi: parsedAbi,
@@ -184,37 +208,24 @@ const Home: NextPage = () => {
         }
       };
 
-      console.log("Setting contract with data:", contractUpdate);
-      
-      // Set the contracts
       await setContracts(contractUpdate);
       
-      // Verify the contract was set
       const contractStore = useContractStore.getState();
-      console.log("Contract store after update:", {
-        networkId,
-        contracts: contractStore.contracts,
-        hasContract: !!contractStore.contracts?.[networkId]?.["YourContract"]
-      });
-
-      // Wait a bit for the store to update
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Verify the contracts were set by checking getAllContracts
       const allContracts = getAllContracts();
-      console.log("Current contracts:", allContracts);
-      
-      // Check if the contract was set for the current network
       const networkContracts = allContracts[networkId];
+      
       if (!networkContracts?.YourContract) {
         throw new Error("Contract not set properly for the selected network");
       }
       
-      console.log("Contract set successfully:", networkContracts);
       setIsContractLoaded(true);
 
       // Route based on contract type
-      if (isUniversalRouter) {
+      if (isBridge) {
+        router.push('/bridge');
+      } else if (isUniversalRouter) {
         router.push('/swap');
       } else if (isERC20Contract(parsedAbi)) {
         router.push('/erc20');
@@ -226,7 +237,6 @@ const Home: NextPage = () => {
 
     } catch (error) {
       console.error('Error:', error);
-      // Add user feedback for the error
       alert('Error setting contract: ' + (error as Error).message);
     } finally {
       setIsLoading(false);

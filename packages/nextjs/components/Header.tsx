@@ -60,6 +60,11 @@ export const menuLinks: HeaderMenuLink[] = [
         description: "Swap ERC20 tokens",
       },
       {
+        label: "Bridge",
+        href: "/bridge",
+        description: "Swap ERC20 tokens",
+      },
+      {
         label: "Custom Contract",
         href: "/readwrite",
         description: "Generic Contract Interface",
