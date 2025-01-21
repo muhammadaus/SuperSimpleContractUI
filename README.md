@@ -1,4 +1,4 @@
-![Image](images/SDCU.png "Super Simple Contract UI")
+![Image](images/SSCU.png "Super Simple Contract UI")
 
 # Smart Contract Interaction using alternative Front End
 
