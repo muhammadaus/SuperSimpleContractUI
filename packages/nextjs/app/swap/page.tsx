@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { createPublicClient, http, parseUnits, formatUnits, isAddress } from 'viem';
+import { createPublicClient, http, parseUnits, formatUnits, isAddress, Address, createWalletClient, custom, encodeFunctionData } from 'viem';
 import { useAccount, useWriteContract, useContractRead } from 'wagmi';
 import { useTransactor } from '~~/hooks/scaffold-eth';
 import { useTargetNetwork } from '~~/hooks/scaffold-eth';
 import { useContractStore } from "~~/utils/scaffold-eth/contract";
 import { TOKEN_LIST } from "~~/utils/scaffold-eth/tokens";
+import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
+import { notification } from "~~/utils/scaffold-eth";
 
 interface Token {
   address: string;
@@ -67,6 +69,10 @@ interface TokenOption {
 }
 
 export default function Swap() {
+  const { address: userAddress } = useAccount();
+  const { targetNetwork } = useTargetNetwork();
+  const writeTxn = useTransactor();
+  const { data: deployedContractData } = useDeployedContractInfo("YourContract");
   const [fromToken, setFromToken] = useState<Token | null>(null);
   const [toToken, setToToken] = useState<Token | null>(null);
   const [fromAmount, setFromAmount] = useState('');
@@ -76,11 +82,8 @@ export default function Swap() {
   const [customToAddress, setCustomToAddress] = useState('');
   const [isLoadingFromToken, setIsLoadingFromToken] = useState(false);
   const [isLoadingToToken, setIsLoadingToToken] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const { address: userAddress } = useAccount();
-  const { targetNetwork } = useTargetNetwork();
-  const writeTxn = useTransactor();
-  
   // Get contract data from the store
   const contracts = useContractStore(state => state.contracts);
   const routerContract = contracts?.[targetNetwork.id]?.YourContract;
@@ -91,69 +94,234 @@ export default function Swap() {
   // Get token list for current network
   const tokens = TOKEN_LIST[targetNetwork.id as keyof typeof TOKEN_LIST] || [];
 
-  const handleSwap = async () => {
-    if (!fromToken || !toToken || !fromAmount || !routerContract) return;
+  const checkAndApproveToken = async (tokenAddress: Address, amount: bigint) => {
+    if (!window.ethereum || !userAddress || !deployedContractData?.address) {
+      notification.error("Please connect your wallet");
+      return;
+    }
+
+    // Skip approval for native token
+    if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000001010".toLowerCase()) {
+      return;
+    }
 
     try {
-      // Here you would:
-      // 1. Get quote from API or quoter contract
-      // 2. Encode the swap commands
-      // 3. Execute the swap
-      console.log("Swap not implemented yet");
+      // Create public client for reading with chain
+      const publicClient = createPublicClient({
+        chain: targetNetwork,
+        transport: custom(window.ethereum),
+      });
+
+      // Create wallet client for writing with account and chain
+      const walletClient = createWalletClient({
+        account: userAddress as Address,
+        chain: targetNetwork,
+        transport: custom(window.ethereum)
+      });
+
+      // Check allowance using public client
+      const allowance = await publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [userAddress, deployedContractData.address]
+      });
+
+      if (allowance < amount) {
+        notification.info("Approving token...");
+        
+        // Need to approve using wallet client
+        const approveTx = await walletClient.writeContract({
+          address: tokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [deployedContractData.address, amount]
+        });
+
+        await publicClient.waitForTransactionReceipt({ hash: approveTx });
+        notification.success("Token approved successfully!");
+      }
     } catch (error) {
-      console.error('Swap failed:', error);
+      console.error('Approval error:', error);
+      notification.error("Failed to approve token: " + (error as Error).message);
+      throw error; // Re-throw to handle in the swap function
+    }
+  };
+
+  const handleSwap = async () => {
+    if (!fromToken || !toToken || !fromAmount || !deployedContractData?.address || !userAddress) {
+      notification.error("Please fill in all fields");
+      return;
+    }
+
+    if (!window.ethereum) {
+      notification.error("Please install MetaMask");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      // Create wallet client with account and chain
+      const client = createWalletClient({
+        account: userAddress as Address,
+        chain: targetNetwork,
+        transport: custom(window.ethereum)
+      });
+
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+      const slippagePercent = parseFloat(slippage) / 100;
+      const parsedAmount = parseUnits(fromAmount, fromToken.decimals);
+      const minOutputAmount = parsedAmount * BigInt(Math.floor((1 - slippagePercent) * 1000)) / 1000n;
+
+      // Check if dealing with native token (ETH/MATIC)
+      const nativeToken = "0x0000000000000000000000000000000000001010";
+      const isFromNative = fromToken.address.toLowerCase() === nativeToken.toLowerCase();
+      const isToNative = toToken.address.toLowerCase() === nativeToken.toLowerCase();
+
+      let txHash;
+
+      if (isFromNative) {
+        // Native -> Token
+        txHash = await client.writeContract({
+          account: userAddress as Address,
+          address: deployedContractData.address as Address,
+          abi: deployedContractData.abi,
+          functionName: 'swapExactETHForTokens',
+          args: [
+            minOutputAmount,
+            [deployedContractData.WETH || nativeToken, toToken.address],
+            userAddress,
+            deadline
+          ],
+          value: parsedAmount
+        });
+      } else if (isToNative) {
+        // Token -> Native
+        if (!isFromNative) {
+          await checkAndApproveToken(fromToken.address as Address, parsedAmount);
+        }
+        txHash = await client.writeContract({
+          account: userAddress as Address,
+          address: deployedContractData.address as Address,
+          abi: deployedContractData.abi,
+          functionName: 'swapExactTokensForETH',
+          args: [
+            parsedAmount,
+            minOutputAmount,
+            [fromToken.address, deployedContractData.WETH || nativeToken],
+            userAddress,
+            deadline
+          ]
+        });
+      } else {
+        // Token -> Token
+        await checkAndApproveToken(fromToken.address as Address, parsedAmount);
+        txHash = await client.writeContract({
+          account: userAddress as Address,
+          address: deployedContractData.address as Address,
+          abi: deployedContractData.abi,
+          functionName: 'swapExactTokensForTokens',
+          args: [
+            parsedAmount,
+            minOutputAmount,
+            [fromToken.address, toToken.address],
+            userAddress,
+            deadline
+          ]
+        });
+      }
+
+      console.log('Swap transaction submitted:', txHash);
+      notification.success("Swap transaction submitted!");
+
+    } catch (err) {
+      console.error('Swap failed:', err);
+      notification.error("Swap failed: " + (err as Error).message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   // Function to validate and get token name
   const handleGetTokenName = async (address: string, isFromToken: boolean) => {
-    if (!isAddress(address)) return;
+    if (!isAddress(address)) {
+      notification.error("Invalid address format");
+      return;
+    }
 
     try {
       isFromToken ? setIsLoadingFromToken(true) : setIsLoadingToToken(true);
       
       const client = createPublicClient({
         chain: targetNetwork,
-        transport: http(),
+        transport: custom(window.ethereum),
       });
 
       // Try to read token info
-      const name = await client.readContract({
-        address: address as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'name',
-      });
+      const [name, symbol, decimals] = await Promise.all([
+        client.readContract({
+          address: address as Address,
+          abi: ERC20_ABI,
+          functionName: 'name',
+        }),
+        client.readContract({
+          address: address as Address,
+          abi: ERC20_ABI,
+          functionName: 'symbol',
+        }),
+        client.readContract({
+          address: address as Address,
+          abi: ERC20_ABI,
+          functionName: 'decimals',
+        })
+      ]);
 
-      const symbol = await client.readContract({
-        address: address as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'symbol',
-      });
-
-      const decimals = await client.readContract({
-        address: address as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'decimals',
-      });
-
-      const token = {
-        address,
+      // Add token to the list if it's not already there
+      const newToken = {
+        address: address as Address,
         name: name as string,
         symbol: symbol as string,
         decimals: Number(decimals),
       };
 
+      // Update token lists
       if (isFromToken) {
-        setFromToken(token);
+        setFromToken(newToken);
+        setCustomFromAddress('');
+        notification.success(`Token loaded: ${newToken.name} (${newToken.symbol})`);
       } else {
-        setToToken(token);
+        setToToken(newToken);
+        setCustomToAddress('');
+        notification.success(`Token loaded: ${newToken.name} (${newToken.symbol})`);
       }
+
     } catch (error) {
-      console.error('Error loading token name:', error);
+      console.error('Error loading token:', error);
+      notification.error("Failed to load token. Make sure this is a valid ERC20 token address.");
     } finally {
       isFromToken ? setIsLoadingFromToken(false) : setIsLoadingToToken(false);
     }
   };
+
+  // Add this effect to update token info when tokens are selected from the list
+  useEffect(() => {
+    if (fromToken) {
+      const token = tokens.find(t => t.address.toLowerCase() === fromToken.address.toLowerCase());
+      if (token) {
+        setCustomFromAddress('');
+      }
+    }
+  }, [fromToken, tokens]);
+
+  useEffect(() => {
+    if (toToken) {
+      const token = tokens.find(t => t.address.toLowerCase() === toToken.address.toLowerCase());
+      if (token) {
+        setCustomToAddress('');
+      }
+    }
+  }, [toToken, tokens]);
 
   return (
     <div className="flex flex-col items-center flex-grow pt-10 px-4 w-full max-w-[600px] mx-auto">
@@ -310,10 +478,14 @@ export default function Swap() {
         {/* Swap Button */}
         <button
           onClick={handleSwap}
-          disabled={!fromToken || !toToken || !fromAmount}
+          disabled={isLoading || !fromToken || !toToken || !fromAmount}
           className="btn btn-primary w-full"
         >
-          Swap
+          {isLoading ? (
+            <span className="loading loading-spinner loading-sm"></span>
+          ) : (
+            "Swap Tokens"
+          )}
         </button>
       </div>
     </div>
