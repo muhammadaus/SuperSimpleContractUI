@@ -1,54 +1,60 @@
 import { wagmiConnectors } from "./wagmiConnectors";
-import { Chain, createClient, http } from "viem";
-import { mainnet, polygon, optimism, arbitrum, base } from "wagmi/chains";
+import { Chain, createClient, fallback, http } from "viem";
+import { mainnet, sepolia, polygon, polygonMumbai, arbitrum, optimism, base, hardhat } from "wagmi/chains";
 import { createConfig } from "wagmi";
 import scaffoldConfig from "~~/scaffold.config";
-import { getAlchemyHttpUrl, getTargetNetwork } from "~~/utils/scaffold-eth";
+import { getAlchemyHttpUrl } from "~~/utils/scaffold-eth";
 
-const targetNetwork = getTargetNetwork();
+// Create a single-item array with the target network
+const targetNetworks: Chain[] = [scaffoldConfig.targetNetwork];
 
-// Define supported chains explicitly for RainbowKit
-const supportedChains = [
-  mainnet,
-  polygon,
-  optimism,
-  arbitrum,
-  base,
-] as const;
+// Map of supported chains for easy lookup
+const supportedChains: { [key: number]: Chain } = {
+  1: mainnet,
+  11155111: sepolia,
+  137: polygon,
+  80001: polygonMumbai,
+  42161: arbitrum,
+  10: optimism,
+  8453: base,
+  31337: hardhat,
+};
 
-// Log chain information
-console.log("Supported Chains:", supportedChains.map(chain => ({
-  id: chain.id,
-  name: chain.name,
-  network: chain.network,
-})));
-
-// Create transport configuration for all supported chains
-const transports = Object.fromEntries(
-  supportedChains.map(chain => [
-    chain.id,
-    http(
-      getAlchemyHttpUrl(chain.id) || 
-      chain.rpcUrls.default.http[0]
-    )
-  ])
-);
-
-/**
- * Wagmi config with all supported chains
- */
-export const wagmiConfig = createConfig({
-  chains: supportedChains,
-  connectors: wagmiConnectors,
-  transports,
-  pollingInterval: scaffoldConfig.pollingInterval,
+// Filter target networks to only include supported chains
+const validTargetNetworks = targetNetworks.map((network: Chain) => {
+  const supportedChain = supportedChains[network.id];
+  if (!supportedChain) {
+    console.warn(`Chain ${network.id} is not supported by wagmi. Using custom configuration.`);
+    return network;
+  }
+  return supportedChain;
 });
 
-// Create a public client for general use
-export const publicClient = createClient({
-  chain: targetNetwork,
-  transport: http(
-    getAlchemyHttpUrl(targetNetwork.id) || 
-    targetNetwork.rpcUrls.default.http[0]
-  ),
+// We always want to have mainnet enabled (ENS resolution, ETH price, etc). But only once.
+export const enabledChains = validTargetNetworks.find((network: Chain) => network.id === 1)
+  ? validTargetNetworks
+  : ([...validTargetNetworks, mainnet] as const);
+
+export const wagmiConfig = createConfig({
+  chains: enabledChains,
+  connectors: wagmiConnectors,
+  ssr: true,
+  client({ chain }) {
+    let rpcFallbacks = [http()];
+
+    const alchemyHttpUrl = getAlchemyHttpUrl(chain.id);
+    if (alchemyHttpUrl) {
+      rpcFallbacks = [http(alchemyHttpUrl), http()];
+    }
+
+    return createClient({
+      chain,
+      transport: fallback(rpcFallbacks),
+      ...(chain.id !== hardhat.id
+        ? {
+            pollingInterval: scaffoldConfig.pollingInterval,
+          }
+        : {}),
+    });
+  },
 });
