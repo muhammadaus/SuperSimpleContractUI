@@ -1,7 +1,7 @@
 import { useTargetNetwork } from "./useTargetNetwork";
 import { Abi, ExtractAbiEventNames } from "abitype";
 import { Log } from "viem";
-import { useWatchContractEvent } from "wagmi";
+// import { useWatchContractEvent } from "wagmi";
 import { addIndexedArgsToEvent, useDeployedContractInfo } from "~~/hooks/scaffold-eth";
 import { ContractAbi, ContractName, UseScaffoldEventConfig } from "~~/utils/scaffold-eth/contract";
 
@@ -17,21 +17,21 @@ export const useScaffoldWatchContractEvent = <
   TContractName extends ContractName,
   TEventName extends ExtractAbiEventNames<ContractAbi<TContractName>>,
 >({
-  contractName,
-  eventName,
+  // contractName,
+  // eventName,
   onLogs,
 }: UseScaffoldEventConfig<TContractName, TEventName>) => {
-  const { data: deployedContractData } = useDeployedContractInfo(contractName);
-  const { targetNetwork } = useTargetNetwork();
+  // const { data: deployedContractData } = useDeployedContractInfo(contractName);
+  // const { targetNetwork } = useTargetNetwork();
 
   const addIndexedArgsToLogs = (logs: Log[]) => logs.map(addIndexedArgsToEvent);
   const listenerWithIndexedArgs = (logs: Log[]) => onLogs(addIndexedArgsToLogs(logs) as Parameters<typeof onLogs>[0]);
 
-  return useWatchContractEvent({
-    address: deployedContractData?.address,
-    abi: deployedContractData?.abi as Abi,
-    chainId: targetNetwork.id,
-    onLogs: listenerWithIndexedArgs,
-    eventName,
-  });
+  // return useWatchContractEvent({
+  //   address: deployedContractData?.address,
+  //   abi: deployedContractData?.abi as Abi,
+  //   chainId: targetNetwork.id,
+  //   onLogs: listenerWithIndexedArgs,
+  //   eventName,
+  // });
 };

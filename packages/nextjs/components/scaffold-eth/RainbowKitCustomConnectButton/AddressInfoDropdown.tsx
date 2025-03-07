@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Address } from "viem";
-import { useChainId, useConfig } from "wagmi";
+// import { useChainId, useConfig } from "wagmi";
 import { getBlockExplorerAddressLink, getTargetNetwork } from "~~/utils/scaffold-eth";
 import { ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from "@heroicons/react/24/outline";
 
@@ -14,11 +14,11 @@ type AddressInfoDropdownProps = {
 
 export const AddressInfoDropdown = ({ address, displayName, ensAvatar }: AddressInfoDropdownProps) => {
   const [addressCopied, setAddressCopied] = useState(false);
-  const chainId = useChainId();
-  const config = useConfig();
+  // const chainId = useChainId();
+  // const config = useConfig();
 
   // Determine if we're on the correct network
-  const isTargetNetwork = chainId === targetNetwork.id;
+  // const isTargetNetwork = chainId === targetNetwork.id;
 
   // Copy address to clipboard
   const copyAddress = () => {
@@ -53,7 +53,7 @@ export const AddressInfoDropdown = ({ address, displayName, ensAvatar }: Address
         </button>
         {isTargetNetwork && (
           <a
-            href={getBlockExplorerAddressLink(config.chains[0], address)}
+            // href={getBlockExplorerAddressLink(config.chains[0], address)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-gray-400 hover:text-gray-200 transition-colors"

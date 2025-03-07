@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Address } from "viem";
-import { useAccount } from "wagmi";
+// import { useAccount } from "wagmi";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
 
 export default function BridgePage() {
-  const { address: userAddress } = useAccount();
+  // const { address: userAddress } = useAccount();
   const { data: deployedContractData } = useDeployedContractInfo("YourContract");
   const [amount, setAmount] = useState("");
   const [l2Address, setL2Address] = useState("");

@@ -1,5 +1,5 @@
 export * from "./useAnimationConfig";
-export * from "./useBurnerWallet";
+// export * from "./useBurnerWallet";
 export * from "./useContractLogs";
 export * from "./useDeployedContractInfo";
 export * from "./useFetchBlocks";

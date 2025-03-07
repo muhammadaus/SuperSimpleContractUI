@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Address } from "~~/components/scaffold-eth";
-import { useContractWrite, useContractRead } from "wagmi";
+// import { useContractWrite, useContractRead } from "wagmi";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { useContractStore } from "~~/utils/scaffold-eth/contract";
 import { notification } from "~~/utils/scaffold-eth";
@@ -20,19 +20,19 @@ export const FunctionForm = ({ functionFragment, contractAddress }: FunctionForm
 
   const isWriteFunction = functionFragment.stateMutability !== "view" && functionFragment.stateMutability !== "pure";
 
-  const { data: readData, isLoading: isReadLoading } = useContractRead({
-    address: contractAddress as `0x${string}`,
-    abi: contract?.abi,
-    functionName: functionFragment.name,
-    args: functionFragment.inputs.map((input: any) => inputs[input.name] || ""),
-    enabled: !isWriteFunction && !!contractAddress,
-  });
+  // const { data: readData, isLoading: isReadLoading } = useContractRead({
+  //   address: contractAddress as `0x${string}`,
+  //   abi: contract?.abi,
+  //   functionName: functionFragment.name,
+  //   args: functionFragment.inputs.map((input: any) => inputs[input.name] || ""),
+  //   enabled: !isWriteFunction && !!contractAddress,
+  // });
 
-  const { write: writeFunction, isLoading: isWriteLoading } = useContractWrite({
-    address: contractAddress as `0x${string}`,
-    abi: contract?.abi,
-    functionName: functionFragment.name,
-  });
+  // const { write: writeFunction, isLoading: isWriteLoading } = useContractWrite({
+  //   address: contractAddress as `0x${string}`,
+  //   abi: contract?.abi,
+  //   functionName: functionFragment.name,
+  // });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

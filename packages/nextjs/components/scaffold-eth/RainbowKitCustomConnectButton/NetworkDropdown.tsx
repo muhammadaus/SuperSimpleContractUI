@@ -1,19 +1,19 @@
-import { useChainId, useConfig } from "wagmi";
+// import { useChainId, useConfig } from "wagmi";
 import { switchNetwork } from "wagmi/actions";
 import { getTargetNetwork } from "~~/utils/scaffold-eth";
 
 const targetNetwork = getTargetNetwork();
 
 export const NetworkDropdown = () => {
-  const chainId = useChainId();
-  const config = useConfig();
+  // const chainId = useChainId();
+  // const config = useConfig();
 
-  const isTargetNetwork = chainId === targetNetwork.id;
+  // const isTargetNetwork = chainId === targetNetwork.id;
 
   const handleNetworkSwitch = async () => {
-    if (!isTargetNetwork) {
-      await switchNetwork(config, { chainId: targetNetwork.id });
-    }
+    // if (!isTargetNetwork) {
+    //   await switchNetwork(config, { chainId: targetNetwork.id });
+    // }
   };
 
   return (
