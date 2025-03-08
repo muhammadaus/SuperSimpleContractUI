@@ -7,19 +7,18 @@ import { PencilIcon } from "@heroicons/react/24/outline";
 import Select, { SingleValue } from 'react-select';
 import * as viemChains from 'viem/chains';
 import { isAddress } from 'viem';
-import { setContracts } from '~~/utils/scaffold-eth/contract';
-import { updateTargetNetworks } from '~~/scaffold.config';
+import { setContracts } from '@/utils/scaffold-eth/contract';
+import scaffoldConfig from '@/scaffold.config';
 import { Chain } from 'viem/chains';
 import { Address } from "viem";
-import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
+import { GenericContractsDeclaration } from "@/utils/scaffold-eth/contract";
 import { useRouter } from 'next/navigation';
-import { useContractStore } from "~~/utils/scaffold-eth/contract";
-import { setTargetNetwork } from "~~/utils/scaffold-eth/networks";
-import { getAllContracts } from "~~/utils/scaffold-eth/contractsData";
-import * as wagmiChains from "wagmi/chains";
+import { useContractStore } from "@/utils/scaffold-eth/contract";
+import { setTargetNetwork } from "@/utils/scaffold-eth/networks";
+import { getAllContracts } from "@/utils/scaffold-eth/contractsData";
 
 // Define the chain names type from viem/chains
-type ChainName = keyof typeof import('viem/chains');
+type ChainName = keyof typeof viemChains;
 
 // Define the ChainOption interface
 interface ChainOption {
@@ -45,7 +44,7 @@ const Home: NextPage = () => {
 
   // Get all chain information
   const chainInfo = useMemo(() => {
-    const chains = Object.entries(wagmiChains)
+    const chains = Object.entries(viemChains)
       .filter(([name, chain]) => 
         typeof chain === 'object' && 
         'id' in chain && 
@@ -57,7 +56,7 @@ const Home: NextPage = () => {
         displayName: chain.name,
       }));
 
-    console.log("Available Wagmi Chains:", chains);
+    console.log("Available Chains:", chains);
     
     // Create a mapping of chain IDs to names
     const chainIdToName = Object.fromEntries(

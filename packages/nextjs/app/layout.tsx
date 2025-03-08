@@ -1,21 +1,21 @@
-import "@rainbow-me/rainbowkit/styles.css";
-import { ScaffoldEthAppWithProviders } from "~~/components/ScaffoldEthAppWithProviders";
-import "~~/styles/globals.css";
-import { getMetadata } from "~~/utils/scaffold-eth/getMetadata";
+import "@/styles/globals.css";
+import type { Metadata } from "next";
 
-export const metadata = getMetadata({
-  title: "Interact with EVM Smart Contracts",
-  description: "Built with 🏗 Scaffold-ETH 2",
-});
+export const metadata: Metadata = {
+  title: "Pure Contracts",
+  description: "Interact with EVM Smart Contracts",
+};
 
-const ScaffoldEthApp = ({ children }: { children: React.ReactNode }) => {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html suppressHydrationWarning>
+    <html lang="en">
       <body>
-          <ScaffoldEthAppWithProviders>{children}</ScaffoldEthAppWithProviders>
+        {children}
       </body>
     </html>
   );
-};
-
-export default ScaffoldEthApp;
+}

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 // import { useChainId, useConfig } from "wagmi";
-import { switchNetwork } from "wagmi/actions";
+// import { switchNetwork } from "wagmi/actions";
 import { getTargetNetwork } from "~~/utils/scaffold-eth";
 
 type NetworkOptionsProps = {

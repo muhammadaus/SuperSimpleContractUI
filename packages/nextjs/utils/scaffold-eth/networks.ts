@@ -1,22 +1,21 @@
 import { create } from 'zustand';
-import { Chain } from "viem";
+import { Chain } from "viem/chains";
 import * as chains from "viem/chains";
-import scaffoldConfig from "~~/scaffold.config";
+import scaffoldConfig from '@/scaffold.config';
 
 interface NetworkStore {
-  currentNetwork: Chain;
-  setNetwork: (network: Chain) => void;
+  targetNetwork: Chain | null;
+  setTargetNetwork: (network: Chain) => void;
 }
 
-// Add this new type to handle both single and multiple networks
-export type TargetNetwork = Chain | Chain[];
-
 export const useNetworkStore = create<NetworkStore>((set) => ({
-  currentNetwork: Array.isArray(scaffoldConfig.targetNetwork) 
-    ? scaffoldConfig.targetNetwork[0] 
-    : scaffoldConfig.targetNetwork,
-  setNetwork: (network) => set({ currentNetwork: network }),
+  targetNetwork: null,
+  setTargetNetwork: (network) => set({ targetNetwork: network }),
 }));
+
+export const setTargetNetwork = (network: Chain) => {
+  useNetworkStore.getState().setTargetNetwork(network);
+};
 
 export type TChainAttributes = {
   name: string;
@@ -60,16 +59,19 @@ export function getAlchemyHttpUrl(chainId: number) {
 }
 
 export function getTargetNetwork(): chains.Chain & TChainAttributes {
-  const network = useNetworkStore.getState().currentNetwork;
+  const network = useNetworkStore.getState().targetNetwork;
+  if (!network) {
+    return {
+      ...chains.mainnet,
+      name: chains.mainnet.name,
+      color: "#1E40AF", // Default color
+    };
+  }
   return {
     ...network,
     name: network.name,
     color: "#1E40AF", // Default color
   };
-}
-
-export function setTargetNetwork(network: Chain): void {
-  useNetworkStore.getState().setNetwork(network);
 }
 
 /**
