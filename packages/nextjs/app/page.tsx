@@ -164,6 +164,34 @@ const Home: NextPage = () => {
     return matchCount >= 3;
   };
 
+  // Add this function to detect wrappable tokens
+  const isWrappableToken = (abi: any[]): boolean => {
+    // Check for WETH (has deposit and withdraw functions)
+    const isWETH = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'deposit' &&
+        item.stateMutability === 'payable'
+    ) && abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'withdraw'
+    );
+
+    // Check for wstETH (has wrap and unwrap functions)
+    const isWstETH = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'wrap'
+    ) && abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'unwrap'
+    );
+
+    return isWETH || isWstETH;
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
@@ -194,6 +222,7 @@ const Home: NextPage = () => {
       );
 
       const isBridge = isBridgeContract(parsedAbi);
+      const isWrappable = isWrappableToken(parsedAbi);
 
       // Get the network ID from the selected network
       const selectedChain = (viemChains as any)[selectedNetwork.value];
@@ -236,7 +265,9 @@ const Home: NextPage = () => {
       setIsContractLoaded(true);
 
       // Route based on contract type
-      if (isBridge) {
+      if (isWrappable) {
+        router.push('/wrap');
+      } else if (isBridge) {
         router.push('/bridge');
       } else if (isUniversalRouter) {
         router.push('/swap');

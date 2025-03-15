@@ -101,14 +101,16 @@ export default function NFT() {
         args: [BigInt(tokenId)],
       });
       
-      setTokenURI(uri as string);
+      // Convert uri to string safely
+      const uriString = typeof uri === 'string' ? uri : String(uri);
+      setTokenURI(uriString);
       
       // Fetch metadata if URI is available
       if (uri) {
         try {
           // For IPFS URIs, you would need to handle them differently
           // This is a simplified example for HTTP URIs
-          const response = await fetch(uri as string);
+          const response = await fetch(uriString);
           const metadata = await response.json();
           setTokenMetadata(metadata);
         } catch (error) {
