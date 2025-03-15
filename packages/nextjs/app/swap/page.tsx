@@ -92,6 +92,7 @@ export default function Swap() {
   const [isLoadingFromToken, setIsLoadingFromToken] = useState(false);
   const [isLoadingToToken, setIsLoadingToToken] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [swapQuote, setSwapQuote] = useState<any>(null);
 
   // Get contract data from the store
   const contracts = useContractStore(state => state.contracts);
@@ -335,31 +336,82 @@ export default function Swap() {
     }
   }, [toToken, tokens]);
 
-  return (
-    <div className="flex flex-col items-center flex-grow pt-10 px-4 w-full max-w-[600px] mx-auto">
-      <h1 className="text-center mb-8">
-        <span className="block text-4xl font-bold">Swap</span>
-      </h1>
+  const getSwapQuote = async () => {
+    if (!fromToken || !toToken || !fromAmount) return;
+    
+    setIsLoading(true);
+    
+    try {
+      // Mock API call to get swap quote
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Mock response
+      const mockQuote = {
+        fromToken: fromToken,
+        toToken: toToken,
+        fromAmount: fromAmount,
+        toAmount: (parseFloat(fromAmount) * 1.5).toString(),
+        exchangeRate: 1.5,
+        estimatedGas: "100000",
+        validFor: "30 seconds",
+      };
+      
+      setSwapQuote(mockQuote);
+    } catch (error) {
+      console.error("Error getting swap quote:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      {/* Notice about ERC20 approval */}
-      <div className="alert alert-info mb-4">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-        <div>
-          <h3 className="font-bold">Important!</h3>
-          <div className="text-sm">Make sure to approve ERC20 tokens before swapping. You can do this through the token's contract on Etherscan. This will not be required after the next Ethereum protocol upgrade in 2025.</div>
+  // Show loading if contract data is not available
+  if (!routerContract) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
+        <div className="bg-gray-900 p-6 rounded-xl shadow-xl border border-gray-800">
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+            <p className="text-white">Loading contract data...</p>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      <div className="w-full mb-8 p-4 rounded-xl bg-base-200">
+  return (
+    <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
+      <div className="text-center">
+        <h1>
+          <span className="block text-2xl mb-2 text-gray-300">Decentralized</span>
+          <span className="block text-4xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+            Token Swap
+          </span>
+        </h1>
+        <p className="text-lg text-gray-300 mt-2">
+          Swap tokens directly from your wallet
+        </p>
+      </div>
+
+      {/* Notice about ERC20 approval */}
+      <div className="w-full max-w-md mt-4 p-4 rounded-xl bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
+        <p>Note: Swapping ERC20 tokens requires approval first. This will be handled automatically during the swap process.</p>
+      </div>
+
+      {/* Swap Form */}
+      <div className="w-full max-w-md my-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
         {/* From Token */}
         <div className="mb-4">
-          <h2 className="text-xl font-bold mb-2">From</h2>
+          <h2 className="text-xl font-bold mb-2 text-gray-300">From</h2>
           <input
             type="number"
             value={fromAmount}
             onChange={(e) => setFromAmount(e.target.value)}
             placeholder="0.0"
-            className="w-full p-3 rounded-xl mb-2 bg-base-100"
+            className="w-full p-3 rounded-xl mb-2 bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <div className="flex flex-col gap-2">
             {/* Token Input Form */}
@@ -369,17 +421,28 @@ export default function Swap() {
                 value={customFromAddress}
                 onChange={(e) => setCustomFromAddress(e.target.value)}
                 placeholder="Token Address (0x...)"
-                className="flex-1 p-3 rounded-xl bg-base-100"
+                className={`flex-1 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+                  ${!isAddress(customFromAddress) && customFromAddress ? 'border-red-500' : 'border-gray-700'}
+                  text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                  ${!isAddress(customFromAddress) && customFromAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
               />
               <button
                 onClick={() => isAddress(customFromAddress) && handleGetTokenName(customFromAddress, true)}
                 disabled={!isAddress(customFromAddress) || isLoadingFromToken}
-                className="btn btn-primary min-w-[120px]"
+                className={`px-4 py-2 rounded-xl shadow-lg transition-all duration-200 
+                  ${(!isAddress(customFromAddress) || isLoadingFromToken)
+                    ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                    : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+                  } font-medium min-w-[120px]`}
               >
                 {isLoadingFromToken ? (
-                  <span className="loading loading-spinner"></span>
+                  <div className="flex justify-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
                 ) : (
-                  "Get Token Name"
+                  "Get Token"
                 )}
               </button>
             </div>
@@ -390,7 +453,9 @@ export default function Swap() {
                 <button
                   key={token.address}
                   onClick={() => setFromToken(token)}
-                  className={`btn btn-sm ${fromToken?.address === token.address ? 'btn-primary' : 'btn-ghost'}`}
+                  className={`px-3 py-1 rounded-lg text-sm ${fromToken?.address === token.address 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                 >
                   {token.symbol}
                 </button>
@@ -398,36 +463,40 @@ export default function Swap() {
             </div>
           </div>
           {fromToken && (
-            <div className="mt-2 text-sm">
+            <div className="mt-2 text-sm text-blue-400">
               Selected: {fromToken.name} ({fromToken.symbol})
             </div>
           )}
         </div>
 
         {/* Swap Direction Button */}
-        <button 
-          className="btn btn-circle btn-ghost my-2"
-          onClick={() => {
-            const temp = fromToken;
-            setFromToken(toToken);
-            setToToken(temp);
-            const tempAddress = customFromAddress;
-            setCustomFromAddress(customToAddress);
-            setCustomToAddress(tempAddress);
-          }}
-        >
-          ↓
-        </button>
+        <div className="flex justify-center my-4">
+          <button 
+            className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 text-white"
+            onClick={() => {
+              const temp = fromToken;
+              setFromToken(toToken);
+              setToToken(temp);
+              const tempAddress = customFromAddress;
+              setCustomFromAddress(customToAddress);
+              setCustomToAddress(tempAddress);
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+          </button>
+        </div>
 
         {/* To Token */}
         <div className="mb-4">
-          <h2 className="text-xl font-bold mb-2">To</h2>
+          <h2 className="text-xl font-bold mb-2 text-gray-300">To</h2>
           <input
             type="number"
             value={toAmount}
             onChange={(e) => setToAmount(e.target.value)}
             placeholder="0.0"
-            className="w-full p-3 rounded-xl mb-2 bg-base-100"
+            className="w-full p-3 rounded-xl mb-2 bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled
           />
           <div className="flex flex-col gap-2">
@@ -438,17 +507,28 @@ export default function Swap() {
                 value={customToAddress}
                 onChange={(e) => setCustomToAddress(e.target.value)}
                 placeholder="Token Address (0x...)"
-                className="flex-1 p-3 rounded-xl bg-base-100"
+                className={`flex-1 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+                  ${!isAddress(customToAddress) && customToAddress ? 'border-red-500' : 'border-gray-700'}
+                  text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                  ${!isAddress(customToAddress) && customToAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
               />
               <button
                 onClick={() => isAddress(customToAddress) && handleGetTokenName(customToAddress, false)}
                 disabled={!isAddress(customToAddress) || isLoadingToToken}
-                className="btn btn-primary min-w-[120px]"
+                className={`px-4 py-2 rounded-xl shadow-lg transition-all duration-200 
+                  ${(!isAddress(customToAddress) || isLoadingToToken)
+                    ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                    : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+                  } font-medium min-w-[120px]`}
               >
                 {isLoadingToToken ? (
-                  <span className="loading loading-spinner"></span>
+                  <div className="flex justify-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
                 ) : (
-                  "Get Token Name"
+                  "Get Token"
                 )}
               </button>
             </div>
@@ -459,7 +539,9 @@ export default function Swap() {
                 <button
                   key={token.address}
                   onClick={() => setToToken(token)}
-                  className={`btn btn-sm ${toToken?.address === token.address ? 'btn-primary' : 'btn-ghost'}`}
+                  className={`px-3 py-1 rounded-lg text-sm ${toToken?.address === token.address 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                 >
                   {token.symbol}
                 </button>
@@ -467,20 +549,20 @@ export default function Swap() {
             </div>
           </div>
           {toToken && (
-            <div className="mt-2 text-sm">
+            <div className="mt-2 text-sm text-blue-400">
               Selected: {toToken.name} ({toToken.symbol})
             </div>
           )}
         </div>
 
         {/* Slippage Setting */}
-        <div className="mb-4">
-          <label className="text-sm">Slippage Tolerance (%)</label>
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-300 mb-2">Slippage Tolerance (%)</label>
           <input
             type="number"
             value={slippage}
             onChange={(e) => setSlippage(e.target.value)}
-            className="w-full p-2 rounded-xl bg-base-100"
+            className="w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             step="0.1"
             min="0.1"
             max="5"
@@ -491,12 +573,24 @@ export default function Swap() {
         <button
           onClick={handleSwap}
           disabled={isLoading || !fromToken || !toToken || !fromAmount}
-          className="btn btn-primary w-full"
+          className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+            ${(isLoading || !fromToken || !toToken || !fromAmount)
+              ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+              : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+            } font-medium`}
         >
-          {isLoading ? (
-            <span className="loading loading-spinner loading-sm"></span>
-          ) : (
-            "Swap Tokens"
+          <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
+            Swap Tokens
+          </span>
+          
+          {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex gap-1">
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
           )}
         </button>
       </div>

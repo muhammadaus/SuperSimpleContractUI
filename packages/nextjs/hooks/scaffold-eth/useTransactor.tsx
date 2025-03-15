@@ -16,7 +16,7 @@ export const useTransactor = () => {
       return;
     }
 
-    let notificationId = null;
+    let notificationId: string = "";
     try {
       setIsPending(true);
       notificationId = notification.loading("Awaiting for user confirmation");
