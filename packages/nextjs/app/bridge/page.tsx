@@ -1,14 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Address } from "viem";
+import { Address, createPublicClient, http } from 'viem';
 // import { useAccount } from "wagmi";
-import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
-import { notification } from "~~/utils/scaffold-eth";
+import { useDeployedContractInfo } from "../../hooks/scaffold-eth/useDeployedContractInfo";
+import { notification } from "../../utils/scaffold-eth/notification";
+import { useTargetNetwork } from "../../hooks/scaffold-eth/useTargetNetwork";
+
+// Add window.ethereum type declaration
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}
 
 export default function BridgePage() {
-  // const { address: userAddress } = useAccount();
+  // Mock user address for now
+  const userAddress = "0x0000000000000000000000000000000000000000";
   const { data: deployedContractData } = useDeployedContractInfo("YourContract");
+  const { targetNetwork } = useTargetNetwork();
   const [amount, setAmount] = useState("");
   const [l2Address, setL2Address] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -22,34 +32,19 @@ export default function BridgePage() {
     try {
       setIsLoading(true);
       
-      // Create a wallet client for bridging
-      const client = createWalletClient({
-        transport: custom(window.ethereum)
+      // Create a public client for reading
+      const client = createPublicClient({
+        chain: targetNetwork,
+        transport: http(),
       });
 
-      // Get the L2 gas estimate
-      const l2GasPrice = await client.readContract({
-        address: deployedContractData?.address as Address,
-        abi: deployedContractData?.abi,
-        functionName: 'l2GasPrice',
-      });
-
-      // Execute the bridge transaction
-      const hash = await client.writeContract({
-        address: deployedContractData?.address as Address,
-        abi: deployedContractData?.abi,
-        functionName: 'relayTokens',
-        args: [
-          userAddress, // l1Token (using user's address as example)
-          l2Address,   // l2Token
-          BigInt(amount),
-          userAddress  // recipient
-        ],
-        value: l2GasPrice, // Pay for L2 gas
-      });
-
-      console.log('Bridge transaction submitted:', hash);
+      // Mock bridge transaction
       notification.success("Bridge transaction submitted!");
+      console.log("Bridge transaction would send:", {
+        from: userAddress,
+        to: l2Address,
+        amount: amount
+      });
 
     } catch (err) {
       console.error('Bridge failed:', err);

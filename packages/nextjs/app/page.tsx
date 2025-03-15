@@ -195,8 +195,17 @@ const Home: NextPage = () => {
 
       const isBridge = isBridgeContract(parsedAbi);
 
-      const networkId = (viemChains as any)[selectedNetwork.value].id;
+      // Get the network ID from the selected network
+      const selectedChain = (viemChains as any)[selectedNetwork.value];
+      if (!selectedChain || !selectedChain.id) {
+        throw new Error(`Invalid network selected: ${selectedNetwork.value}`);
+      }
+      const networkId = selectedChain.id;
       
+      // Set the target network
+      setTargetNetwork(selectedChain);
+      
+      // Create the contract update
       const contractUpdate: GenericContractsDeclaration = {
         [networkId]: {
           "YourContract": {
@@ -207,15 +216,20 @@ const Home: NextPage = () => {
         }
       };
 
+      // Set the contracts in the store
       await setContracts(contractUpdate);
       
-      const contractStore = useContractStore.getState();
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Wait for the state to update
+      await new Promise(resolve => setTimeout(resolve, 300));
       
+      // Get all contracts and verify the contract was set
       const allContracts = getAllContracts();
-      const networkContracts = allContracts[networkId];
+      console.log("All contracts after setting:", allContracts);
       
-      if (!networkContracts?.YourContract) {
+      // Check if the contract exists for the selected network
+      if (!allContracts[networkId] || !allContracts[networkId]["YourContract"]) {
+        console.error("Contract not found for network ID:", networkId);
+        console.error("Available contracts:", allContracts);
         throw new Error("Contract not set properly for the selected network");
       }
       

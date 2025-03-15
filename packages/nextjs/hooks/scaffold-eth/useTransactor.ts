@@ -1,16 +1,37 @@
 import { useState } from "react";
 import { Hash } from "viem";
-import { useNetworkStore } from "~~/utils/scaffold-eth/networks";
+import { notification } from "../../utils/scaffold-eth/notification";
 
+/**
+ * Runs Transaction passed in to returned function showing UI feedback.
+ * @returns function that takes in transaction function as callback, shows UI feedback for transaction and returns a promise of the transaction hash
+ */
 export const useTransactor = () => {
   const [isPending, setIsPending] = useState(false);
-  const { currentNetwork } = useNetworkStore();
 
-  const transactor = async (tx: () => Promise<Hash>) => {
-    setIsPending(true);
+  const transactor = async (tx: () => Promise<Hash | string>) => {
+    if (isPending) {
+      notification.info("Transaction already in progress");
+      return;
+    }
+
+    let notificationId = null;
     try {
+      setIsPending(true);
+      notificationId = notification.loading("Awaiting for user confirmation");
+      
       const result = await tx();
-      return result;
+      
+      notification.remove(notificationId);
+      notification.success("Transaction completed successfully!");
+      
+      return result as Hash;
+    } catch (error: any) {
+      if (notificationId) {
+        notification.remove(notificationId);
+      }
+      console.error("Transaction error:", error);
+      notification.error(error.message || "Transaction failed");
     } finally {
       setIsPending(false);
     }

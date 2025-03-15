@@ -1,6 +1,6 @@
 import { ReadWrite } from "./_components/ReadWrite";
 import type { NextPage } from "next";
-import { getMetadata } from "~~/utils/scaffold-eth/getMetadata";
+import { getMetadata } from "../../utils/scaffold-eth/getMetadata";
 
 export const metadata = getMetadata({
   title: "ReadWrite Contracts",

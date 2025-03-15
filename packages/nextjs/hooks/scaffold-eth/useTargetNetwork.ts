@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Chain } from "viem";
-import { getTargetNetwork } from "~~/utils/scaffold-eth";
+import { getTargetNetwork } from "../../utils/scaffold-eth/networks";
 
 type TargetNetwork = Chain & {
   color?: string;

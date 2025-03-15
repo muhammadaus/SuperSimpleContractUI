@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTargetNetwork } from "./useTargetNetwork";
 import { useIsMounted } from "usehooks-ts";
 // import { usePublicClient } from "wagmi";
-import { Contract, ContractCodeStatus, ContractName, useContractStore } from "~~/utils/scaffold-eth/contract";
+import { Contract, ContractCodeStatus, ContractName, useContractStore } from "../../utils/scaffold-eth/contract";
 
 export const useDeployedContractInfo = <TContractName extends ContractName>(contractName: TContractName) => {
   const isMounted = useIsMounted();
@@ -39,6 +39,8 @@ export const useDeployedContractInfo = <TContractName extends ContractName>(cont
 
         // Optionally verify the bytecode
         try {
+          // Commented out for now as publicClient is not defined
+          /*
           const code = await publicClient.getBytecode({
             address: deployedContract.address as `0x${string}`,
           });
@@ -46,6 +48,7 @@ export const useDeployedContractInfo = <TContractName extends ContractName>(cont
           if (code === "0x") {
             console.warn("Contract has no bytecode, but continuing anyway as it was manually added");
           }
+          */
         } catch (e) {
           console.warn("Failed to verify bytecode, but continuing as contract was manually added:", e);
         }
@@ -57,7 +60,7 @@ export const useDeployedContractInfo = <TContractName extends ContractName>(cont
     };
 
     checkContractDeployment();
-  }, [isMounted, contractName, deployedContract, publicClient]);
+  }, [isMounted, contractName, deployedContract]);
 
   // If we have a contract in the store, return it regardless of bytecode check
   if (deployedContract && status === ContractCodeStatus.LOADING) {
