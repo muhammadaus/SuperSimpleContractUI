@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from "next/link";
 import type { NextPage } from "next";
-import { PencilIcon } from "@heroicons/react/24/outline";
+import { PencilIcon, TableCellsIcon, CodeBracketIcon } from "@heroicons/react/24/outline";
 import Select, { SingleValue } from 'react-select';
 import * as viemChains from 'viem/chains';
 import { isAddress } from 'viem';
@@ -26,10 +26,20 @@ interface ChainOption {
   label: string;
 }
 
+// Define ABI function type for table view
+interface ABIFunction {
+  type: string;
+  name: string;
+  inputs: { type: string; name: string }[];
+  outputs?: { type: string; name: string }[];
+  stateMutability?: string;
+}
+
 const Home: NextPage = () => {
   const router = useRouter();
   const [address, setAddress] = useState('');
   const [abi, setAbi] = useState('');
+  const [formattedAbi, setFormattedAbi] = useState('');
   const [isAddressEmpty, setIsAddressEmpty] = useState(true);
   const [isAddressTooShort, setIsAddressTooShort] = useState(false);
   const [isAbiInvalid, setIsAbiInvalid] = useState(false);
@@ -41,6 +51,8 @@ const Home: NextPage = () => {
   const [isValidAddress, setIsValidAddress] = useState(false);
   const [isValidAbi, setIsValidAbi] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showTableView, setShowTableView] = useState(false);
+  const [parsedAbi, setParsedAbi] = useState<any[]>([]);
 
   // Get all chain information
   const chainInfo = useMemo(() => {
@@ -87,14 +99,31 @@ const Home: NextPage = () => {
     const newAbi = e.target.value;
     setAbi(newAbi);
     try {
-      JSON.parse(newAbi);
+      const parsed = JSON.parse(newAbi);
+      setParsedAbi(parsed);
       setIsAbiInvalid(false);
       setIsValidAbi(true);
+      
+      // Format the ABI with proper indentation for display
+      setFormattedAbi(JSON.stringify(parsed, null, 2));
     } catch (error) {
       setIsAbiInvalid(true);
       setIsValidAbi(false);
+      setFormattedAbi(newAbi);
     }
   };
+
+  // Format ABI on initial load
+  useEffect(() => {
+    if (abi) {
+      try {
+        const parsed = JSON.parse(abi);
+        setFormattedAbi(JSON.stringify(parsed, null, 2));
+      } catch (error) {
+        setFormattedAbi(abi);
+      }
+    }
+  }, []);
 
   const handleNetworkChange = (selected: SingleValue<ChainOption>) => {
     if (selected) {
@@ -287,6 +316,33 @@ const Home: NextPage = () => {
     }
   };
 
+  // Function to render syntax highlighted JSON
+  const renderSyntaxHighlightedJson = (json: string) => {
+    if (!json) return '';
+    
+    // Simple syntax highlighting
+    return json
+      .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+        let cls = 'text-blue-400'; // strings
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'text-purple-400'; // keys
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'text-green-400'; // booleans
+        } else if (/null/.test(match)) {
+          cls = 'text-red-400'; // null
+        } else {
+          cls = 'text-yellow-400'; // numbers
+        }
+        return `<span class="${cls}">${match}</span>`;
+      })
+      .replace(/[{}\[\]]/g, (match) => {
+        return `<span class="text-gray-300">${match}</span>`;
+      })
+      .replace(/,/g, '<span class="text-gray-300">,</span>');
+  };
+
   console.log("Chain Names:", chainInfo.chains.map(c => c.name));
   console.log("Chain IDs:", chainInfo.chains.map(c => c.id));
 
@@ -368,16 +424,112 @@ const Home: NextPage = () => {
           ${!isValidAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
       />
 
-      <textarea
-        value={abi}
-        onChange={handleAbiChange}
-        placeholder="Enter Contract ABI (JSON format)"
-        className={`w-full max-w-lg my-4 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-          ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
-          text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
-          ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-        rows={8}
-      />
+      <div className="w-full max-w-lg my-4">
+        <div className="flex justify-between items-center mb-2">
+          <label htmlFor="abiInput" className="block text-sm font-medium text-gray-300">
+            Contract ABI (JSON format):
+          </label>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setShowTableView(false)}
+              className={`p-1.5 rounded-md ${!showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title="JSON View"
+            >
+              <CodeBracketIcon className="h-4 w-4 text-white" />
+            </button>
+            <button
+              onClick={() => setShowTableView(true)}
+              className={`p-1.5 rounded-md ${showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title="Table View"
+            >
+              <TableCellsIcon className="h-4 w-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {!showTableView ? (
+          <div className="relative">
+            <textarea
+              id="abiInput"
+              value={abi}
+              onChange={handleAbiChange}
+              placeholder="Enter Contract ABI (JSON format)"
+              className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+                ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
+                text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+              rows={8}
+              style={{ fontFamily: 'monospace' }}
+            />
+            {isValidAbi && formattedAbi && (
+              <div 
+                className="absolute inset-0 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 overflow-auto pointer-events-none"
+                style={{ fontFamily: 'monospace' }}
+              >
+                <pre 
+                  className="text-sm whitespace-pre-wrap"
+                  dangerouslySetInnerHTML={{ __html: renderSyntaxHighlightedJson(formattedAbi) }}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-96">
+            <table className="min-w-full divide-y divide-gray-700">
+              <thead className="bg-gray-800">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Inputs</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Outputs</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">State Mutability</th>
+                </tr>
+              </thead>
+              <tbody className="bg-gray-800/30 divide-y divide-gray-700">
+                {parsedAbi.map((item, index) => (
+                  <tr key={index} className="hover:bg-gray-700/50">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-blue-400">{item.type}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-purple-400">{item.name || '-'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-300">
+                      {item.inputs?.map((input: any, i: number) => (
+                        <div key={i} className="mb-1">
+                          <span className="text-yellow-400">{input.type}</span>
+                          {input.name && <span className="text-gray-400"> {input.name}</span>}
+                        </div>
+                      )) || '-'}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-300">
+                      {item.outputs?.map((output: any, i: number) => (
+                        <div key={i} className="mb-1">
+                          <span className="text-green-400">{output.type}</span>
+                          {output.name && <span className="text-gray-400"> {output.name}</span>}
+                        </div>
+                      )) || '-'}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-sm">
+                      {item.stateMutability ? (
+                        <span className={`
+                          ${item.stateMutability === 'view' || item.stateMutability === 'pure' ? 'text-blue-400' : ''}
+                          ${item.stateMutability === 'nonpayable' ? 'text-yellow-400' : ''}
+                          ${item.stateMutability === 'payable' ? 'text-red-400' : ''}
+                        `}>
+                          {item.stateMutability}
+                        </span>
+                      ) : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        
+        {isAbiInvalid && (
+          <p className="mt-1 text-sm text-red-500">
+            Invalid JSON format. Please check your ABI.
+          </p>
+        )}
+      </div>
 
       <button
         onClick={handleReadWrite}
