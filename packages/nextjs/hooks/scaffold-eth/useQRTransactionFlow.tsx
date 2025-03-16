@@ -8,11 +8,13 @@ import { useCallback, useState, useEffect } from 'react';
 import { Address } from 'viem';
 import { notification } from '../../utils/scaffold-eth/notification';
 import { 
+  useDisconnect,
   useAppKit, 
   useAppKitAccount, 
   useAppKitProvider, 
   useAppKitNetwork,
-  createAppKit
+  createAppKit,
+  AppKit
 } from '@reown/appkit/react';
 import { BrowserProvider, JsonRpcSigner } from 'ethers';
 import type { Provider } from '@reown/appkit/react';
@@ -46,6 +48,7 @@ const getNetworkByChainId = (chainId: number): AppKitNetwork | undefined => {
 };
 
 export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
+  const { disconnect } = useDisconnect();
   const { open, close } = useAppKit();
   const { isConnected, address } = useAppKitAccount();
   const { walletProvider } = useAppKitProvider<Provider>('eip155');
@@ -57,13 +60,26 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
   } | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
 
+  // Function to disconnect wallet and reset state
+  const disconnectAndReset = useCallback(() => {
+    console.log("Disconnecting wallet and resetting state");
+    setPendingTransaction(null);
+    setIsExecuting(false);
+    
+    // The disconnect() function from useAppKit will handle the modal closing
+    // We add a small delay to ensure the state is reset before the modal closes
+    setTimeout(() => {
+      disconnect();
+      console.log("Modal closed, wallet disconnected");
+    }, 500);
+  }, [close]);
+
   // Function to cancel the transaction
-  const cancelTransaction = useCallback(() => {
+  const cancelTransaction = useCallback(async () => {
     console.log("Transaction cancelled by user");
     notification.info('Transaction cancelled');
-    setPendingTransaction(null);
-    close();
-  }, [close]);
+    disconnectAndReset();
+  }, [disconnectAndReset]);
 
   // This function initiates a transaction via AppKit
   const initiateQRTransaction = useCallback(async (
@@ -125,7 +141,7 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
               notification.error(`Failed to switch network: ${(switchError as Error).message}`);
               setPendingTransaction(null);
               setIsExecuting(false);
-              close();
+              disconnect();
               return;
             }
           } else {
@@ -134,7 +150,7 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
               [mainnet, sepolia, arbitrum].map(n => `${n.name} (${n.id})`));
             setPendingTransaction(null);
             setIsExecuting(false);
-            close();
+            disconnect();
             return;
           }
         }
@@ -148,7 +164,7 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
           notification.error(`Unable to switch to the required network. Please switch manually in your wallet.`);
           setPendingTransaction(null);
           setIsExecuting(false);
-          close();
+          disconnect();
           return;
         }
 
@@ -200,7 +216,10 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
               // Clear pending transaction and close modal
               setPendingTransaction(null);
               setIsExecuting(false);
-              close();
+              
+              // Disconnect the wallet before closing the modal
+              console.log("Disconnecting wallet after transaction...");
+              disconnectAndReset();
               return;
             } catch (walletError) {
               console.error("Wallet provider transaction failed:", walletError);
@@ -226,7 +245,10 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
             // Clear pending transaction and close modal
             setPendingTransaction(null);
             setIsExecuting(false);
-            close();
+            
+            // Disconnect the wallet before closing the modal
+            console.log("Disconnecting wallet after transaction...");
+            disconnectAndReset();
           } catch (error) {
             console.error("Error executing transaction:", error);
             
@@ -263,35 +285,44 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
               notification.error(`Transaction failed: ${(error as Error).message}`);
             }
             
-            // Clear pending transaction and close modal on error
+            // Clear pending transaction and close modal
             setPendingTransaction(null);
             setIsExecuting(false);
-            close();
+            
+            // Disconnect the wallet before closing the modal
+            console.log("Disconnecting wallet after error...");
+            disconnectAndReset();
           }
         } catch (error) {
           console.error("Error in transaction flow:", error);
           notification.error(`Transaction flow error: ${(error as Error).message}`);
           
-          // Clear pending transaction and close modal on error
+          // Clear pending transaction and close modal
           setPendingTransaction(null);
           setIsExecuting(false);
-          close();
+          
+          // Disconnect the wallet before closing the modal
+          console.log("Disconnecting wallet after error...");
+          disconnectAndReset();
         }
       } catch (error) {
         console.error("Error in transaction flow:", error);
         notification.error(`Transaction flow error: ${(error as Error).message}`);
         
-        // Clear pending transaction and close modal on error
+        // Clear pending transaction and close modal
         setPendingTransaction(null);
         setIsExecuting(false);
-        close();
+        
+        // Disconnect the wallet before closing the modal
+        console.log("Disconnecting wallet after error...");
+        disconnectAndReset();
       }
     };
     
     // Execute the transaction with a small delay to ensure wallet is fully connected
     setTimeout(executeTransaction, 1000);
     
-  }, [pendingTransaction, isConnected, walletProvider, address, chainId, currentChainId, switchNetwork, isExecuting, close]);
+  }, [pendingTransaction, isConnected, walletProvider, address, chainId, currentChainId, switchNetwork, isExecuting, close, disconnectAndReset]);
 
   // Create a simple modal component with a cancel button
   const QRTransactionModalComponent = () => {

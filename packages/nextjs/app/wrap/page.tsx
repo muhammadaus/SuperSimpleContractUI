@@ -655,13 +655,17 @@ export default function Wrap() {
             )}
           </button>
           
-          {isExecuting && (
+          {(isLoading || isExecuting) && (
             <div className="mt-3 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
               <p className="text-center mb-2">
                 Transaction in progress. Please check your wallet for confirmation requests.
               </p>
               <button
-                onClick={cancelTransaction}
+                onClick={() => {
+                  cancelTransaction();
+                  setIsLoading(false); // Also reset the local loading state
+                  setAmount(''); // Reset the amount input
+                }}
                 className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-xs"
               >
                 Cancel
