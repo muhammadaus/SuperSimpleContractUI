@@ -54,7 +54,13 @@ export default function Wrap() {
   const contractData = contracts?.[targetNetwork.id]?.YourContract;
   
   // Add QR transaction flow
-  const { initiateQRTransaction, QRTransactionModalComponent, isExecuting } = useQRTransactionFlow({
+  const { 
+    initiateQRTransaction, 
+    QRTransactionModalComponent, 
+    isExecuting, 
+    cancelTransaction,
+    isModalOpen
+  } = useQRTransactionFlow({
     chainId: targetNetwork.id,
   });
 
@@ -517,9 +523,15 @@ export default function Wrap() {
           
           {isExecuting && (
             <div className="mt-3 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
-              <p className="text-center">
+              <p className="text-center mb-2">
                 Transaction in progress. Please check your wallet for confirmation requests.
               </p>
+              <button
+                onClick={cancelTransaction}
+                className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-xs"
+              >
+                Cancel
+              </button>
             </div>
           )}
         </div>
