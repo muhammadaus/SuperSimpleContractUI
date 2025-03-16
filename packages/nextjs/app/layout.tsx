@@ -1,5 +1,6 @@
 import "@/styles/globals.css";
 import type { Metadata } from "next";
+import { AppKitProvider } from "@/components/scaffold-eth/AppKitProvider";
 
 export const metadata: Metadata = {
   title: "Pure Contracts",
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
+        <AppKitProvider>
+          {children}
+        </AppKitProvider>
       </body>
     </html>
   );
