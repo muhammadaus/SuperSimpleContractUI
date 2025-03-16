@@ -64,6 +64,15 @@ export default function Wrap() {
     chainId: targetNetwork.id,
   });
 
+  // Log the current target network info for debugging
+  useEffect(() => {
+    console.log("Current target network:", {
+      id: targetNetwork.id,
+      name: targetNetwork.name,
+      nativeCurrency: targetNetwork.nativeCurrency
+    });
+  }, [targetNetwork]);
+
   // Function to connect wallet and get address
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -74,13 +83,49 @@ export default function Wrap() {
     setIsConnecting(true);
     
     try {
-      // Request account access
+      // First try to switch to the correct network
+      try {
+        console.log("Attempting to switch to network ID:", targetNetwork.id);
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
+        });
+        console.log("Successfully switched to network:", targetNetwork.name);
+      } catch (switchError: any) {
+        // This error code indicates that the chain has not been added to MetaMask.
+        if (switchError.code === 4902) {
+          try {
+            // Try to add the network
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [
+                {
+                  chainId: `0x${targetNetwork.id.toString(16)}`,
+                  chainName: targetNetwork.name,
+                  nativeCurrency: targetNetwork.nativeCurrency,
+                  rpcUrls: [targetNetwork.rpcUrls.default.http[0]],
+                  blockExplorerUrls: [targetNetwork.blockExplorers?.default.url],
+                },
+              ],
+            });
+            console.log("Added network to wallet:", targetNetwork.name);
+          } catch (addError) {
+            console.error("Error adding network:", addError);
+            notification.error("Could not add network to your wallet. Please add it manually.");
+          }
+        } else {
+          console.error("Error switching network:", switchError);
+          notification.info(`Please connect to the ${targetNetwork.name} network manually in your wallet.`);
+        }
+      }
+
+      // Then request account access
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       
       if (accounts && accounts.length > 0) {
         setAddress(accounts[0]);
         setIsConnected(true);
-        notification.success("Wallet connected successfully!");
+        notification.success(`Wallet connected on ${targetNetwork.name} network!`);
       } else {
         notification.error("No accounts found. Please check your wallet.");
       }
@@ -109,7 +154,23 @@ export default function Wrap() {
       }
     };
 
+    const handleChainChanged = (chainIdHex: string) => {
+      const chainId = parseInt(chainIdHex, 16);
+      console.log("Chain changed to:", chainId);
+      
+      // Check if the chain matches our target network
+      if (chainId !== targetNetwork.id) {
+        notification.info(`Network changed to chain ID ${chainId}. This app works best on ${targetNetwork.name} (${targetNetwork.id}).`);
+      } else {
+        notification.success(`Connected to ${targetNetwork.name} network!`);
+      }
+      
+      // Force a page refresh to update all state
+      window.location.reload();
+    };
+
     window.ethereum.on('accountsChanged', handleAccountsChanged);
+    window.ethereum.on('chainChanged', handleChainChanged);
 
     // Check if already connected
     const checkConnection = async () => {
@@ -118,6 +179,14 @@ export default function Wrap() {
         if (accounts && accounts.length > 0) {
           setAddress(accounts[0]);
           setIsConnected(true);
+          
+          // Also check if we're on the right chain
+          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+          const connectedChainId = parseInt(chainId, 16);
+          
+          if (connectedChainId !== targetNetwork.id) {
+            notification.info(`You're connected to chain ID ${connectedChainId}. This app works best on ${targetNetwork.name} (${targetNetwork.id}).`);
+          }
         }
       } catch (error) {
         console.error("Error checking connection:", error);
@@ -128,8 +197,9 @@ export default function Wrap() {
 
     return () => {
       window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum.removeListener('chainChanged', handleChainChanged);
     };
-  }, []);
+  }, [targetNetwork]);
 
   // Define token types and their info
   const tokenTypes: Record<TokenType, TokenInfo> = {
@@ -273,6 +343,31 @@ export default function Wrap() {
       return;
     }
 
+    // Check if we need to switch networks first (if using window.ethereum directly)
+    if (window.ethereum) {
+      try {
+        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        const connectedChainId = parseInt(chainId, 16);
+        
+        if (connectedChainId !== targetNetwork.id) {
+          notification.info(`Please switch to the ${targetNetwork.name} network before transacting.`);
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
+            });
+            notification.success(`Switched to ${targetNetwork.name} network!`);
+          } catch (switchError) {
+            console.error("Failed to switch network:", switchError);
+            notification.error("Please switch networks manually in your wallet.");
+            return; // Don't proceed with transaction
+          }
+        }
+      } catch (error) {
+        console.error("Error checking chain:", error);
+      }
+    }
+
     // Don't set loading if the transaction is already executing through AppKit
     if (!isExecuting) {
       setIsLoading(true);
@@ -286,18 +381,57 @@ export default function Wrap() {
         if (selectedTokenType === 'ETH_WETH') {
           if (isWrapping) {
             // Wrap ETH to WETH
-            await initiateQRTransaction(
-              currentToken.contractAddress as Address,
-              '0xd0e30db0', // deposit() function signature
-              parsedAmount
-            );
+            console.log("Initiating wrap transaction");
+            console.log("Amount:", amount, "Parsed amount:", parsedAmount.toString());
+            console.log("Contract target address:", currentToken.contractAddress);
+            console.log("Current chain ID:", targetNetwork.id);
+            
+            // Verify the contract address is valid for this chain
+            if (selectedTokenType === 'ETH_WETH' && targetNetwork.id !== 11155111 && currentToken.contractAddress === '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9') {
+              notification.error(`The contract address is for Sepolia network. Please switch to Sepolia or use a different contract address.`);
+              return;
+            }
+            
+            try {
+              notification.info(`Initiating wrapping of ${amount} ${currentToken.symbol} to ${currentToken.wrappedSymbol} on ${targetNetwork.name}...`);
+              
+              await initiateQRTransaction(
+                currentToken.contractAddress as Address,
+                '0xd0e30db0', // deposit() function signature
+                parsedAmount
+              );
+            } catch (error) {
+              console.error("Failed to initiate wrap transaction:", error);
+              notification.error(`Failed to initiate wrap: ${(error as Error).message}`);
+            }
           } else {
             // Unwrap WETH to ETH
             const data = '0x2e1a7d4d' + parsedAmount.toString(16).padStart(64, '0'); // withdraw(uint) function
-            await initiateQRTransaction(
-              currentToken.contractAddress as Address,
-              data
-            );
+            
+            console.log("Initiating unwrap transaction with data:", data);
+            console.log("Amount:", amount, "Parsed amount:", parsedAmount.toString());
+            console.log("Contract target address:", currentToken.contractAddress);
+            console.log("Current chain ID:", targetNetwork.id);
+            
+            // Verify the contract address is valid for this chain
+            if (selectedTokenType === 'ETH_WETH' && targetNetwork.id !== 11155111 && currentToken.contractAddress === '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9') {
+              notification.error(`The contract address is for Sepolia network. Please switch to Sepolia or use a different contract address.`);
+              return;
+            }
+            
+            // For unwrapping, we're sending 0 value since we're calling a contract method
+            try {
+              notification.info(`Initiating unwrapping of ${amount} ${currentToken.wrappedSymbol} to ${currentToken.symbol} on ${targetNetwork.name}...`);
+              
+              await initiateQRTransaction(
+                currentToken.contractAddress as Address,
+                data,
+                BigInt(0) // Explicitly set value to 0 for unwrapping
+              );
+            } catch (error) {
+              console.error("Failed to initiate unwrap transaction:", error);
+              notification.error(`Failed to initiate unwrap: ${(error as Error).message}`);
+            }
           }
         } else if (selectedTokenType === 'STETH_WSTETH') {
           if (isWrapping) {

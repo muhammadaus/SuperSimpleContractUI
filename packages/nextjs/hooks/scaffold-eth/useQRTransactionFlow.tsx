@@ -106,20 +106,57 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
         // Check if we need to switch networks
         if (currentChainId !== chainId) {
           const network = getNetworkByChainId(chainId);
+          console.log("Network mismatch detected:", { 
+            current: currentChainId, 
+            required: chainId,
+            networkFound: !!network 
+          });
+          
           if (network) {
             notification.info(`Switching to ${network.name} network...`);
-            await switchNetwork(network);
-            // Will continue after chain switch
-            setIsExecuting(false);
-            return;
+            try {
+              await switchNetwork(network);
+              console.log(`Successfully switched to network: ${network.name} (${network.id})`);
+              // Will continue after chain switch - need to reset execution state
+              setIsExecuting(false);
+              return;
+            } catch (switchError) {
+              console.error("Failed to switch network:", switchError);
+              notification.error(`Failed to switch network: ${(switchError as Error).message}`);
+              setPendingTransaction(null);
+              setIsExecuting(false);
+              close();
+              return;
+            }
           } else {
             notification.error(`Network with chain ID ${chainId} not supported`);
+            console.error(`Network with chain ID ${chainId} not found in supported networks:`, 
+              [mainnet, sepolia, arbitrum].map(n => `${n.name} (${n.id})`));
             setPendingTransaction(null);
             setIsExecuting(false);
             close();
             return;
           }
         }
+
+        // Double-check that the network is correct before proceeding
+        if (currentChainId !== chainId) {
+          console.error("Network still doesn't match after attempted switch:", {
+            current: currentChainId,
+            required: chainId
+          });
+          notification.error(`Unable to switch to the required network. Please switch manually in your wallet.`);
+          setPendingTransaction(null);
+          setIsExecuting(false);
+          close();
+          return;
+        }
+
+        console.log("Network validation successful:", {
+          chainId,
+          currentChainId,
+          networkName: getNetworkByChainId(chainId)?.name || 'Unknown'
+        });
 
         const { to, data, value } = pendingTransaction;
         
@@ -130,45 +167,110 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
           
           notification.loading('Please confirm the transaction in your wallet');
           
-          // Set a very high gas limit to ensure the transaction goes through
-          const gasLimit = BigInt(500000); // Much higher gas limit
+          // Use the simplest possible transaction structure
+          // IMPORTANT: The most reliable approach is to let the wallet handle all gas estimation
+          // and to avoid setting any gas parameters
           
-          // Send the transaction with explicit gas limit
-          const tx = await signer.sendTransaction({
-            to,
-            data,
-            value: value ? value : undefined,
-            gasLimit: gasLimit
-          });
-          
-          console.log("Transaction sent successfully:", tx.hash);
-          notification.success(`Transaction sent: ${tx.hash}`);
-          
-          // Clear pending transaction and close modal
-          setPendingTransaction(null);
-          setIsExecuting(false);
-          close();
-        } catch (error) {
-          console.error("Error executing transaction:", error);
-          
-          // Handle specific error types
-          const errorMessage = (error as Error).message.toLowerCase();
-          
-          if (errorMessage.includes('user rejected') || 
-              errorMessage.includes('user denied')) {
-            notification.error("Transaction was rejected by the user");
-          } else if (errorMessage.includes('insufficient funds')) {
-            notification.error("Insufficient funds for transaction");
-          } else if (errorMessage.includes('gas required exceeds allowance') || 
-                    errorMessage.includes('out of gas')) {
-            notification.error("Transaction failed: Gas estimation failed. Try again with a smaller amount.");
-          } else if (errorMessage.includes('nonce')) {
-            notification.error("Transaction failed: Nonce error. Please refresh and try again.");
-          } else if (errorMessage.includes('could not coalesce error')) {
-            notification.error("Transaction failed: The wallet couldn't process the transaction. Please try using a different amount or try again later.");
-          } else {
-            notification.error(`Transaction failed: ${(error as Error).message}`);
+          // Directly use the wallet's provider when possible - most reliable approach
+          if (walletProvider && walletProvider.request) {
+            try {
+              console.log("Using native wallet provider for transaction");
+              
+              // Set an explicit gas limit that's higher than the default
+              // This helps avoid estimation failures in complex transactions
+              const gasLimit = BigInt(500000); // Much higher than standard transfers need
+              
+              // Using the wallet's native transaction method with explicit gas limit
+              console.log("Sending transaction with explicit chainId:", chainId);
+              const txHash = await walletProvider.request({
+                method: 'eth_sendTransaction',
+                params: [{
+                  from: address,
+                  to,
+                  data,
+                  value: value && value > BigInt(0) ? `0x${value.toString(16)}` : undefined,
+                  gas: `0x${gasLimit.toString(16)}`, // Explicit gas limit
+                  chainId: `0x${chainId.toString(16)}` // Explicitly set chain ID
+                }]
+              });
+              
+              console.log("Transaction sent successfully:", txHash);
+              notification.success(`Transaction sent: ${txHash}`);
+              
+              // Clear pending transaction and close modal
+              setPendingTransaction(null);
+              setIsExecuting(false);
+              close();
+              return;
+            } catch (walletError) {
+              console.error("Wallet provider transaction failed:", walletError);
+              // Fall through to ethers approach as backup
+            }
           }
+          
+          // Fallback to ethers.js (less reliable but works as backup)
+          console.log("Falling back to ethers.js for transaction");
+          try {
+            console.log("Sending ethers transaction with chainId:", chainId);
+            const tx = await signer.sendTransaction({
+              to,
+              data,
+              value: value ? value : undefined,
+              gasLimit: BigInt(500000), // Explicit gas limit for ethers too
+              chainId: chainId // Explicitly set chain ID
+            });
+            
+            console.log("Transaction sent successfully via ethers:", tx.hash);
+            notification.success(`Transaction sent: ${tx.hash}`);
+            
+            // Clear pending transaction and close modal
+            setPendingTransaction(null);
+            setIsExecuting(false);
+            close();
+          } catch (error) {
+            console.error("Error executing transaction:", error);
+            
+            // Handle specific error types
+            const errorMessage = (error as Error).message.toLowerCase();
+            
+            if (errorMessage.includes('user rejected') || 
+                errorMessage.includes('user denied')) {
+              notification.error("Transaction was rejected by the user");
+            } else if (errorMessage.includes('insufficient funds')) {
+              notification.error("Insufficient funds for transaction");
+            } else if (errorMessage.includes('gas required exceeds allowance') || 
+                      errorMessage.includes('out of gas')) {
+              notification.error("Transaction failed: Gas estimation failed. Try again with a smaller amount.");
+            } else if (errorMessage.includes('nonce')) {
+              notification.error("Transaction failed: Nonce error. Please refresh and try again.");
+            } else if (errorMessage.includes('could not coalesce error')) {
+              console.error("Detailed transaction error:", error);
+              
+              // Add detailed logging of the transaction parameters to help diagnose the issue
+              console.log("Transaction parameters:", {
+                to,
+                data,
+                value: value ? value.toString() : "0",
+                from: address
+              });
+              
+              // This error often happens with wallets that fail to properly handle gas estimation
+              // or when the blockchain network is congested
+              notification.error(
+                "Transaction failed: The network couldn't process this transaction. Try a different amount or try again later."
+              );
+            } else {
+              notification.error(`Transaction failed: ${(error as Error).message}`);
+            }
+            
+            // Clear pending transaction and close modal on error
+            setPendingTransaction(null);
+            setIsExecuting(false);
+            close();
+          }
+        } catch (error) {
+          console.error("Error in transaction flow:", error);
+          notification.error(`Transaction flow error: ${(error as Error).message}`);
           
           // Clear pending transaction and close modal on error
           setPendingTransaction(null);
@@ -228,4 +330,4 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
     isExecuting,
     cancelTransaction,
   };
-}; 
+};
