@@ -477,31 +477,18 @@ const Home: NextPage = () => {
               </div>
             </div>
 
-            <div className="relative">
-              <textarea
-                id="abiInput"
-                value={abi}
-                onChange={handleAbiChange}
-                placeholder="Enter Contract ABI (JSON format)"
-                className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-                  ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
-                  text-transparent caret-white placeholder-gray-500 focus:outline-none focus:ring-2 
-                  ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-                rows={8}
-                style={{ fontFamily: 'monospace' }}
-              />
-              {formattedAbi && (
-                <div 
-                  className="absolute inset-0 p-3 rounded-xl bg-transparent overflow-auto pointer-events-none"
-                  style={{ fontFamily: 'monospace' }}
-                >
-                  <pre 
-                    className="text-sm whitespace-pre-wrap"
-                    dangerouslySetInnerHTML={{ __html: renderSyntaxHighlightedJson(formattedAbi) }}
-                  />
-                </div>
-              )}
-            </div>
+            <textarea
+              id="abiInput"
+              value={abi}
+              onChange={handleAbiChange}
+              placeholder="Enter Contract ABI (JSON format)"
+              className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+                ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
+                text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+              rows={8}
+              style={{ fontFamily: 'monospace' }}
+            />
             
             {isAbiInvalid && (
               <p className="mt-1 text-sm text-red-500">
@@ -513,7 +500,7 @@ const Home: NextPage = () => {
           <button
             onClick={handleReadWrite}
             disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
-            className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+            className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative mb-4
               ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
                 ? 'bg-gray-700 cursor-not-allowed text-gray-400'
                 : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
@@ -533,31 +520,10 @@ const Home: NextPage = () => {
               </div>
             )}
           </button>
-        </div>
-
-        {/* Right Column - Tutorial, Table View, or Contract Interface */}
-        <div className="md:w-1/2">
-          {contractInterface ? (
-            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto">
-              <Suspense fallback={
-                <div className="p-6 text-center">
-                  <div className="flex justify-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                  <p className="mt-2">Loading contract interface...</p>
-                </div>
-              }>
-                {contractInterface === 'erc20' && <ERC20Interface />}
-                {contractInterface === 'nft' && <NFTInterface />}
-                {contractInterface === 'wrap' && <WrapInterface />}
-                {contractInterface === 'bridge' && <BridgeInterface />}
-                {contractInterface === 'readwrite' && <ReadWriteInterface />}
-              </Suspense>
-            </div>
-          ) : showTableView && parsedAbi.length > 0 ? (
-            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-[500px]">
+          
+          {/* ABI Table View */}
+          {showTableView && parsedAbi.length > 0 && (
+            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-[500px] mb-4">
               <table className="min-w-full divide-y divide-gray-700">
                 <thead className="bg-gray-800 sticky top-0">
                   <tr>
@@ -604,6 +570,30 @@ const Home: NextPage = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column - Tutorial or Contract Interface */}
+        <div className="md:w-1/2">
+          {contractInterface ? (
+            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto">
+              <Suspense fallback={
+                <div className="p-6 text-center">
+                  <div className="flex justify-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                  <p className="mt-2">Loading contract interface...</p>
+                </div>
+              }>
+                {contractInterface === 'erc20' && <ERC20Interface />}
+                {contractInterface === 'nft' && <NFTInterface />}
+                {contractInterface === 'wrap' && <WrapInterface />}
+                {contractInterface === 'bridge' && <BridgeInterface />}
+                {contractInterface === 'readwrite' && <ReadWriteInterface />}
+              </Suspense>
             </div>
           ) : (
             <div className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 h-full overflow-auto">
@@ -652,6 +642,19 @@ const Home: NextPage = () => {
                     <li>Project documentation or GitHub repositories</li>
                     <li>Directly from smart contract developers</li>
                   </ul>
+                </div>
+                
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Need to deploy a contract?</h3>
+                  <p className="mb-4">
+                    If you need to deploy a smart contract instead of interacting with an existing one:
+                  </p>
+                  <Link 
+                    href="/deploy" 
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white text-sm font-medium transition-all duration-200"
+                  >
+                    Go to Contract Deployment →
+                  </Link>
                 </div>
               </div>
             </div>
