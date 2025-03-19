@@ -116,7 +116,10 @@ export default function WrapInterface() {
             functionName: 'balanceOf',
             args: [userAddress as Address],
           });
-          setWrappedBalance(wrappedTokenBalance as bigint);
+          // Make sure we're safely converting to bigint
+          setWrappedBalance(typeof wrappedTokenBalance === 'bigint' 
+            ? wrappedTokenBalance 
+            : BigInt(String(wrappedTokenBalance)));
         }
       } catch (error) {
         console.error("Error fetching balances:", error);

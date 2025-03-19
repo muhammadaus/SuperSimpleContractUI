@@ -73,7 +73,7 @@ export default function NFTInterface() {
             args: []
           });
           console.log("Collection Name:", name);
-          setCollectionName(name as string);
+          setCollectionName(typeof name === 'string' ? name : String(name));
         } catch (error) {
           console.error("Error reading collection name:", error);
         }
@@ -87,7 +87,7 @@ export default function NFTInterface() {
             args: []
           });
           console.log("Collection Symbol:", symbol);
-          setCollectionSymbol(symbol as string);
+          setCollectionSymbol(typeof symbol === 'string' ? symbol : String(symbol));
         } catch (error) {
           console.error("Error reading collection symbol:", error);
         }
@@ -156,7 +156,7 @@ export default function NFTInterface() {
           functionName: 'tokenURI',
           args: [BigInt(tokenId)]
         });
-        uri = result as string;
+        uri = typeof result === 'string' ? result : String(result);
         setTokenURI(uri);
         
         // Fetch metadata if URI is available

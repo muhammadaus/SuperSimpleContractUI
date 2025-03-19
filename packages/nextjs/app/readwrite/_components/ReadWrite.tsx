@@ -87,7 +87,7 @@ export default function ReadWrite() {
           });
           
           if (name) {
-            setContractName(name as string);
+            setContractName(typeof name === 'string' ? name : String(name));
           }
         } catch (error) {
           console.log("Contract might not have a name function");
@@ -445,7 +445,7 @@ export default function ReadWrite() {
                     {functionResults[func.name].map((val: any, idx: number) => (
                       <div key={idx} className="flex">
                         <span className="text-gray-400 mr-2">[{idx}]:</span>
-                        <span>{formatValue(val, func.outputs[idx]?.type || 'unknown')}</span>
+                        <span>{formatValue(val, func.outputs && idx < func.outputs.length ? func.outputs[idx]?.type || 'unknown' : 'unknown')}</span>
                       </div>
                     ))}
                   </div>

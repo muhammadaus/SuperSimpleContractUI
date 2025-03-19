@@ -463,7 +463,12 @@ const Home: NextPage = () => {
                   <CodeBracketIcon className="h-4 w-4 text-white" />
                 </button>
                 <button
-                  onClick={() => { setShowTableView(true); setShowTutorial(false); }}
+                  onClick={() => { 
+                    if (parsedAbi.length > 0) {
+                      setShowTableView(true); 
+                      setShowTutorial(false); 
+                    }
+                  }}
                   className={`p-1.5 rounded-md ${showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                   title="Table View"
                 >
@@ -480,12 +485,12 @@ const Home: NextPage = () => {
                 placeholder="Enter Contract ABI (JSON format)"
                 className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
                   ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
-                  text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                  text-transparent caret-white placeholder-gray-500 focus:outline-none focus:ring-2 
                   ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
                 rows={8}
-                style={{ fontFamily: 'monospace', color: 'transparent', caretColor: 'white' }}
+                style={{ fontFamily: 'monospace' }}
               />
-              {isValidAbi && formattedAbi && (
+              {formattedAbi && (
                 <div 
                   className="absolute inset-0 p-3 rounded-xl bg-transparent overflow-auto pointer-events-none"
                   style={{ fontFamily: 'monospace' }}
@@ -551,10 +556,10 @@ const Home: NextPage = () => {
                 {contractInterface === 'readwrite' && <ReadWriteInterface />}
               </Suspense>
             </div>
-          ) : showTableView ? (
-            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-96">
+          ) : showTableView && parsedAbi.length > 0 ? (
+            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-[500px]">
               <table className="min-w-full divide-y divide-gray-700">
-                <thead className="bg-gray-800">
+                <thead className="bg-gray-800 sticky top-0">
                   <tr>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
