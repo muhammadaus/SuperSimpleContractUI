@@ -330,7 +330,7 @@ export const useQRTransactionFlow = ({ chainId }: QRTransactionFlowProps) => {
     
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
-        <div className="bg-gray-800 p-4 rounded-xl shadow-xl border border-gray-700 max-w-sm w-full">
+        <div className="bg-gray-800 p-4 rounded-xl shadow-xl border border-gray-700 max-w-xs w-full">
           <div className="text-center mb-4">
             <h3 className="text-lg font-medium text-white">Transaction Pending</h3>
             <p className="text-gray-300 text-sm mt-2">

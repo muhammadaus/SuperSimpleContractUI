@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { isAddress, formatEther, parseEther, createPublicClient, http } from 'viem';
+import { isAddress, formatEther, parseEther, createPublicClient, http, Address } from 'viem';
 import { useTransactor } from '../../hooks/scaffold-eth/useTransactor';
 import { useTargetNetwork } from '../../hooks/scaffold-eth/useTargetNetwork';
 import { useContractStore } from "../../utils/scaffold-eth/contract";
+import { notification } from "../../utils/scaffold-eth/notification";
+import { useQRTransactionFlow } from "../../hooks/scaffold-eth/useQRTransactionFlow";
 
 export default function ERC20() {
   const [tokenName, setTokenName] = useState<string>("");
@@ -13,6 +15,7 @@ export default function ERC20() {
   const [spenderAddress, setSpenderAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [userBalance, setUserBalance] = useState<bigint>(BigInt(0));
+  const [isLoading, setIsLoading] = useState(false);
 
   // Mock user address for now
   const userAddress = "0x0000000000000000000000000000000000000000";
@@ -22,6 +25,17 @@ export default function ERC20() {
   // Get contract data from the store
   const contracts = useContractStore(state => state.contracts);
   const contractData = contracts?.[targetNetwork.id]?.YourContract;
+
+  // Add QR transaction flow
+  const { 
+    initiateQRTransaction, 
+    QRTransactionModalComponent, 
+    isExecuting, 
+    cancelTransaction,
+    isModalOpen
+  } = useQRTransactionFlow({
+    chainId: targetNetwork.id,
+  });
 
   // Mock write operations
   const transferToken = async (params: any) => {
@@ -102,42 +116,98 @@ export default function ERC20() {
   }
 
   const handleTransfer = async () => {
-    if (!isAddress(recipientAddress) || !amount || !transferToken || !contractData) return;
+    if (!isAddress(recipientAddress) || !amount || !contractData) return;
+    
+    // Don't set loading if the transaction is already executing through AppKit
+    if (!isExecuting) {
+      setIsLoading(true);
+    }
     
     try {
-      const makeTransfer = async () => {
-        const result = await transferToken({
-          address: contractData.address,
-          abi: contractData.abi,
-          functionName: 'transfer',
-          args: [recipientAddress as `0x${string}`, parseEther(amount)],
-        });
-        return result as `0x${string}`;
-      };
+      const parsedAmount = parseEther(amount);
       
-      await writeTxn(makeTransfer);
+      // Create the transfer data
+      // For ERC20 transfer: function transfer(address to, uint256 amount)
+      // Function signature: 0xa9059cbb
+      const transferData = '0xa9059cbb' + 
+        recipientAddress.substring(2).padStart(64, '0') + 
+        parsedAmount.toString(16).padStart(64, '0');
+      
+      console.log("Initiating transfer transaction");
+      console.log("Amount:", amount, "Parsed amount:", parsedAmount.toString());
+      console.log("Recipient:", recipientAddress);
+      
+      try {
+        notification.info(`Initiating transfer of ${amount} ${tokenSymbol} to ${recipientAddress.substring(0, 6)}...${recipientAddress.substring(38)} on ${targetNetwork.name}...`);
+        
+        await initiateQRTransaction(
+          contractData.address as Address,
+          transferData,
+          BigInt(0) // No ETH value is sent for token transfers
+        );
+        
+        // Reset amount after transaction is initiated
+        setAmount('');
+      } catch (error) {
+        console.error("Failed to initiate transfer transaction:", error);
+        notification.error(`Failed to initiate transfer: ${(error as Error).message}`);
+      }
     } catch (error) {
-      console.error('Transfer failed:', error);
+      console.error("Transfer failed:", error);
+      notification.error(`Transaction failed: ${(error as Error).message}`);
+    } finally {
+      // Only reset loading if AppKit is not executing
+      if (!isExecuting) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleApprove = async () => {
-    if (!isAddress(spenderAddress) || !amount || !approveToken || !contractData) return;
+    if (!isAddress(spenderAddress) || !amount || !contractData) return;
+    
+    // Don't set loading if the transaction is already executing through AppKit
+    if (!isExecuting) {
+      setIsLoading(true);
+    }
     
     try {
-      const makeApprove = async () => {
-        const result = await approveToken({
-          address: contractData.address,
-          abi: contractData.abi,
-          functionName: 'approve',
-          args: [spenderAddress as `0x${string}`, parseEther(amount)],
-        });
-        return result as `0x${string}`;
-      };
+      const parsedAmount = parseEther(amount);
       
-      await writeTxn(makeApprove);
+      // Create the approve data
+      // For ERC20 approve: function approve(address spender, uint256 amount)
+      // Function signature: 0x095ea7b3
+      const approveData = '0x095ea7b3' + 
+        spenderAddress.substring(2).padStart(64, '0') + 
+        parsedAmount.toString(16).padStart(64, '0');
+      
+      console.log("Initiating approve transaction");
+      console.log("Amount:", amount, "Parsed amount:", parsedAmount.toString());
+      console.log("Spender:", spenderAddress);
+      
+      try {
+        notification.info(`Initiating approval of ${amount} ${tokenSymbol} for ${spenderAddress.substring(0, 6)}...${spenderAddress.substring(38)} on ${targetNetwork.name}...`);
+        
+        await initiateQRTransaction(
+          contractData.address as Address,
+          approveData,
+          BigInt(0) // No ETH value is sent for token approvals
+        );
+        
+        // Reset amount after transaction is initiated
+        setAmount('');
+      } catch (error) {
+        console.error("Failed to initiate approve transaction:", error);
+        notification.error(`Failed to initiate approval: ${(error as Error).message}`);
+      }
     } catch (error) {
-      console.error('Approval failed:', error);
+      console.error("Approval failed:", error);
+      notification.error(`Transaction failed: ${(error as Error).message}`);
+    } finally {
+      // Only reset loading if AppKit is not executing
+      if (!isExecuting) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -179,14 +249,26 @@ export default function ERC20() {
         />
         <button
           onClick={handleTransfer}
-          disabled={!isAddress(recipientAddress) || !amount}
-          className={`w-full mt-4 px-6 py-3 rounded-xl shadow-lg transition-all duration-200
-            ${(!isAddress(recipientAddress) || !amount)
+          disabled={!isAddress(recipientAddress) || !amount || isLoading || isExecuting}
+          className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+            ${(!isAddress(recipientAddress) || !amount || isLoading || isExecuting)
               ? 'bg-gray-700 cursor-not-allowed text-gray-400'
               : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
             } font-medium`}
         >
-          Transfer
+          <span className={`${isLoading || isExecuting ? 'opacity-0' : 'opacity-100'}`}>
+            Transfer
+          </span>
+          
+          {(isLoading || isExecuting) && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex gap-1">
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
+          )}
         </button>
       </div>
 
@@ -214,16 +296,50 @@ export default function ERC20() {
         />
         <button
           onClick={handleApprove}
-          disabled={!isAddress(spenderAddress) || !amount}
-          className={`w-full mt-4 px-6 py-3 rounded-xl shadow-lg transition-all duration-200
-            ${(!isAddress(spenderAddress) || !amount)
+          disabled={!isAddress(spenderAddress) || !amount || isLoading || isExecuting}
+          className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+            ${(!isAddress(spenderAddress) || !amount || isLoading || isExecuting)
               ? 'bg-gray-700 cursor-not-allowed text-gray-400'
               : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
             } font-medium`}
         >
-          Approve
+          <span className={`${isLoading || isExecuting ? 'opacity-0' : 'opacity-100'}`}>
+            Approve
+          </span>
+          
+          {(isLoading || isExecuting) && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex gap-1">
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
+          )}
         </button>
       </div>
+      
+      {/* Cancel transaction option during loading/executing */}
+      {(isLoading || isExecuting) && (
+        <div className="w-full max-w-md mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
+          <p className="text-center mb-2">
+            Transaction in progress. Please check your wallet for confirmation requests.
+          </p>
+          <button
+            onClick={() => {
+              cancelTransaction();
+              setIsLoading(false);
+              setAmount('');
+            }}
+            className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-xs"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Render QR Transaction Modal */}
+      <QRTransactionModalComponent />
     </div>
   );
 } 

@@ -53,6 +53,7 @@ const Home: NextPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showTableView, setShowTableView] = useState(false);
   const [parsedAbi, setParsedAbi] = useState<any[]>([]);
+  const [showTutorial, setShowTutorial] = useState(true); // State for showing tutorial/table view
 
   // Get all chain information
   const chainInfo = useMemo(() => {
@@ -347,8 +348,8 @@ const Home: NextPage = () => {
   console.log("Chain IDs:", chainInfo.chains.map(c => c.id));
 
   return (
-    <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
-      <div className="text-center">
+    <div className="flex flex-col min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
+      <div className="text-center py-10">
         <h1>
           <span className="block text-2xl mb-2 text-gray-300">Interact with</span>
           <span className="block text-4xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
@@ -367,193 +368,251 @@ const Home: NextPage = () => {
         </p>
       </div>
 
-      <div className="w-full max-w-md my-4">
-        <label htmlFor="networkSelector" className="block text-sm font-medium text-gray-300 mb-2">
-          Select Network:
-        </label>
-        <Select
-          id="networkSelector"
-          value={selectedNetwork}
-          options={options}
-          onChange={handleNetworkChange}
-          styles={{
-            control: (base) => ({
-              ...base,
-              backgroundColor: '#1f2937',
-              borderColor: '#374151',
-              color: '#fff',
-              boxShadow: 'none',
-              '&:hover': {
-                borderColor: '#4b5563'
-              }
-            }),
-            menu: (base) => ({
-              ...base,
-              backgroundColor: '#1f2937',
-              border: '1px solid #374151'
-            }),
-            option: (base, state) => ({
-              ...base,
-              backgroundColor: state.isFocused ? '#374151' : '#1f2937',
-              color: '#fff',
-              '&:hover': {
-                backgroundColor: '#374151'
-              }
-            }),
-            singleValue: (base) => ({
-              ...base,
-              color: '#fff'
-            }),
-            input: (base) => ({
-              ...base,
-              color: '#fff'
-            })
-          }}
-          className="mt-1"
-        />
-      </div>
-
-      <input
-        type="text"
-        value={address}
-        onChange={handleAddressChange}
-        placeholder="Enter Smart Contract Address"
-        className={`w-full max-w-md my-4 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-          ${!isValidAddress ? 'border-red-500' : 'border-gray-700'}
-          text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
-          ${!isValidAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-      />
-
-      <div className="w-full max-w-lg my-4">
-        <div className="flex justify-between items-center mb-2">
-          <label htmlFor="abiInput" className="block text-sm font-medium text-gray-300">
-            Contract ABI (JSON format):
-          </label>
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setShowTableView(false)}
-              className={`p-1.5 rounded-md ${!showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
-              title="JSON View"
-            >
-              <CodeBracketIcon className="h-4 w-4 text-white" />
-            </button>
-            <button
-              onClick={() => setShowTableView(true)}
-              className={`p-1.5 rounded-md ${showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
-              title="Table View"
-            >
-              <TableCellsIcon className="h-4 w-4 text-white" />
-            </button>
-          </div>
-        </div>
-
-        {!showTableView ? (
-          <div className="relative">
-            <textarea
-              id="abiInput"
-              value={abi}
-              onChange={handleAbiChange}
-              placeholder="Enter Contract ABI (JSON format)"
-              className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-                ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
-                text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
-                ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-              rows={8}
-              style={{ fontFamily: 'monospace' }}
+      <div className="flex flex-col md:flex-row flex-grow px-4 pb-10 gap-6">
+        {/* Left Column - Contract Input Form */}
+        <div className="md:w-1/2">
+          <div className="w-full mb-4">
+            <label htmlFor="networkSelector" className="block text-sm font-medium text-gray-300 mb-2">
+              Select Network:
+            </label>
+            <Select
+              id="networkSelector"
+              value={selectedNetwork}
+              options={options}
+              onChange={handleNetworkChange}
+              styles={{
+                control: (base) => ({
+                  ...base,
+                  backgroundColor: '#1f2937',
+                  borderColor: '#374151',
+                  color: '#fff',
+                  boxShadow: 'none',
+                  '&:hover': {
+                    borderColor: '#4b5563'
+                  }
+                }),
+                menu: (base) => ({
+                  ...base,
+                  backgroundColor: '#1f2937',
+                  border: '1px solid #374151'
+                }),
+                option: (base, state) => ({
+                  ...base,
+                  backgroundColor: state.isFocused ? '#374151' : '#1f2937',
+                  color: '#fff',
+                  '&:hover': {
+                    backgroundColor: '#374151'
+                  }
+                }),
+                singleValue: (base) => ({
+                  ...base,
+                  color: '#fff'
+                }),
+                input: (base) => ({
+                  ...base,
+                  color: '#fff'
+                })
+              }}
+              className="mt-1"
             />
-            {isValidAbi && formattedAbi && (
-              <div 
-                className="absolute inset-0 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 overflow-auto pointer-events-none"
-                style={{ fontFamily: 'monospace' }}
-              >
-                <pre 
-                  className="text-sm whitespace-pre-wrap"
-                  dangerouslySetInnerHTML={{ __html: renderSyntaxHighlightedJson(formattedAbi) }}
-                />
+          </div>
+
+          <input
+            type="text"
+            value={address}
+            onChange={handleAddressChange}
+            placeholder="Enter Smart Contract Address"
+            className={`w-full my-4 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+              ${!isValidAddress ? 'border-red-500' : 'border-gray-700'}
+              text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+              ${!isValidAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+          />
+
+          <div className="w-full mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <label htmlFor="abiInput" className="block text-sm font-medium text-gray-300">
+                Contract ABI (JSON format):
+              </label>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => { setShowTableView(false); setShowTutorial(true); }}
+                  className={`p-1.5 rounded-md ${!showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  title="JSON View"
+                >
+                  <CodeBracketIcon className="h-4 w-4 text-white" />
+                </button>
+                <button
+                  onClick={() => { setShowTableView(true); setShowTutorial(false); }}
+                  className={`p-1.5 rounded-md ${showTableView ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  title="Table View"
+                >
+                  <TableCellsIcon className="h-4 w-4 text-white" />
+                </button>
               </div>
+            </div>
+
+            <div className="relative">
+              <textarea
+                id="abiInput"
+                value={abi}
+                onChange={handleAbiChange}
+                placeholder="Enter Contract ABI (JSON format)"
+                className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+                  ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
+                  text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+                  ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+                rows={8}
+                style={{ fontFamily: 'monospace', color: 'transparent', caretColor: 'white' }}
+              />
+              {isValidAbi && formattedAbi && (
+                <div 
+                  className="absolute inset-0 p-3 rounded-xl bg-transparent overflow-auto pointer-events-none"
+                  style={{ fontFamily: 'monospace' }}
+                >
+                  <pre 
+                    className="text-sm whitespace-pre-wrap"
+                    dangerouslySetInnerHTML={{ __html: renderSyntaxHighlightedJson(formattedAbi) }}
+                  />
+                </div>
+              )}
+            </div>
+            
+            {isAbiInvalid && (
+              <p className="mt-1 text-sm text-red-500">
+                Invalid JSON format. Please check your ABI.
+              </p>
             )}
           </div>
-        ) : (
-          <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-96">
-            <table className="min-w-full divide-y divide-gray-700">
-              <thead className="bg-gray-800">
-                <tr>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Inputs</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Outputs</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">State Mutability</th>
-                </tr>
-              </thead>
-              <tbody className="bg-gray-800/30 divide-y divide-gray-700">
-                {parsedAbi.map((item, index) => (
-                  <tr key={index} className="hover:bg-gray-700/50">
-                    <td className="px-4 py-2 whitespace-nowrap text-sm text-blue-400">{item.type}</td>
-                    <td className="px-4 py-2 whitespace-nowrap text-sm text-purple-400">{item.name || '-'}</td>
-                    <td className="px-4 py-2 text-sm text-gray-300">
-                      {item.inputs?.map((input: any, i: number) => (
-                        <div key={i} className="mb-1">
-                          <span className="text-yellow-400">{input.type}</span>
-                          {input.name && <span className="text-gray-400"> {input.name}</span>}
-                        </div>
-                      )) || '-'}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-300">
-                      {item.outputs?.map((output: any, i: number) => (
-                        <div key={i} className="mb-1">
-                          <span className="text-green-400">{output.type}</span>
-                          {output.name && <span className="text-gray-400"> {output.name}</span>}
-                        </div>
-                      )) || '-'}
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-sm">
-                      {item.stateMutability ? (
-                        <span className={`
-                          ${item.stateMutability === 'view' || item.stateMutability === 'pure' ? 'text-blue-400' : ''}
-                          ${item.stateMutability === 'nonpayable' ? 'text-yellow-400' : ''}
-                          ${item.stateMutability === 'payable' ? 'text-red-400' : ''}
-                        `}>
-                          {item.stateMutability}
-                        </span>
-                      ) : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        
-        {isAbiInvalid && (
-          <p className="mt-1 text-sm text-red-500">
-            Invalid JSON format. Please check your ABI.
-          </p>
-        )}
-      </div>
 
-      <button
-        onClick={handleReadWrite}
-        disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
-        className={`my-4 px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
-          ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
-            ? 'bg-gray-700 cursor-not-allowed text-gray-400'
-            : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
-          } font-medium`}
-      >
-        <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
-          Load Contract
-        </span>
-        
-        {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex gap-1">
-              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+          <button
+            onClick={handleReadWrite}
+            disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
+            className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
+              ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
+                ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+              } font-medium`}
+          >
+            <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
+              Load Contract
+            </span>
+            
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+              </div>
+            )}
+          </button>
+        </div>
+
+        {/* Right Column - Tutorial or Table View */}
+        <div className="md:w-1/2">
+          {showTableView ? (
+            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-96">
+              <table className="min-w-full divide-y divide-gray-700">
+                <thead className="bg-gray-800">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Inputs</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Outputs</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">State Mutability</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-gray-800/30 divide-y divide-gray-700">
+                  {parsedAbi.map((item, index) => (
+                    <tr key={index} className="hover:bg-gray-700/50">
+                      <td className="px-4 py-2 whitespace-nowrap text-sm text-blue-400">{item.type}</td>
+                      <td className="px-4 py-2 whitespace-nowrap text-sm text-purple-400">{item.name || '-'}</td>
+                      <td className="px-4 py-2 text-sm text-gray-300">
+                        {item.inputs?.map((input: any, i: number) => (
+                          <div key={i} className="mb-1">
+                            <span className="text-yellow-400">{input.type}</span>
+                            {input.name && <span className="text-gray-400"> {input.name}</span>}
+                          </div>
+                        )) || '-'}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-gray-300">
+                        {item.outputs?.map((output: any, i: number) => (
+                          <div key={i} className="mb-1">
+                            <span className="text-green-400">{output.type}</span>
+                            {output.name && <span className="text-gray-400"> {output.name}</span>}
+                          </div>
+                        )) || '-'}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap text-sm">
+                        {item.stateMutability ? (
+                          <span className={`
+                            ${item.stateMutability === 'view' || item.stateMutability === 'pure' ? 'text-blue-400' : ''}
+                            ${item.stateMutability === 'nonpayable' ? 'text-yellow-400' : ''}
+                            ${item.stateMutability === 'payable' ? 'text-red-400' : ''}
+                          `}>
+                            {item.stateMutability}
+                          </span>
+                        ) : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        )}
-      </button>
+          ) : (
+            <div className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 h-full overflow-auto">
+              <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+                Getting Started
+              </h2>
+              
+              <div className="space-y-4 text-gray-300">
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-400 mb-2">What is this tool?</h3>
+                  <p>
+                    This interface allows you to interact with any smart contract on EVM-compatible blockchains.
+                    Simply input the contract address and ABI to access read and write functions.
+                  </p>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-400 mb-2">How to use:</h3>
+                  <ol className="list-decimal pl-5 space-y-2">
+                    <li>Select the appropriate network from the dropdown</li>
+                    <li>Enter the smart contract address</li>
+                    <li>Paste the contract ABI (JSON format)</li>
+                    <li>Click "Load Contract" to interact with the contract</li>
+                  </ol>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Contract types supported:</h3>
+                  <ul className="list-disc pl-5 space-y-1">
+                    <li><span className="font-medium">ERC-20 tokens</span> - For standard fungible tokens</li>
+                    <li><span className="font-medium">ERC-721 NFTs</span> - For non-fungible tokens</li>
+                    <li><span className="font-medium">Wrapped tokens</span> - For WETH, wstETH, and similar contracts</li>
+                    <li><span className="font-medium">Bridge contracts</span> - For cross-chain interactions</li>
+                    <li><span className="font-medium">Universal Router</span> - For complex swap workflows</li>
+                    <li><span className="font-medium">General contracts</span> - Any other EVM contract</li>
+                  </ul>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Where to find contract ABI?</h3>
+                  <p>
+                    You can find contract ABIs on:
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 mt-2">
+                    <li>Etherscan (verified contracts)</li>
+                    <li>Project documentation or GitHub repositories</li>
+                    <li>Directly from smart contract developers</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Optional: Add a loading overlay for the entire page */}
       {isLoading && (
