@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import Link from "next/link";
 import type { NextPage } from "next";
 import { PencilIcon, TableCellsIcon, CodeBracketIcon } from "@heroicons/react/24/outline";
@@ -16,6 +16,15 @@ import { useRouter } from 'next/navigation';
 import { useContractStore } from "@/utils/scaffold-eth/contract";
 import { setTargetNetwork } from "@/utils/scaffold-eth/networks";
 import { getAllContracts } from "@/utils/scaffold-eth/contractsData";
+import { notification } from "@/utils/scaffold-eth/notification";
+import dynamic from 'next/dynamic';
+
+// Lazy load contract interfaces
+const ERC20Interface = dynamic(() => import('./erc20/interface'), { ssr: false });
+const NFTInterface = dynamic(() => import('./nft/interface'), { ssr: false });
+const WrapInterface = dynamic(() => import('./wrap/interface'), { ssr: false });
+const BridgeInterface = dynamic(() => import('./bridge/interface'), { ssr: false });
+const ReadWriteInterface = dynamic(() => import('./readwrite/_components/ReadWrite'), { ssr: false });
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof viemChains;
@@ -53,7 +62,8 @@ const Home: NextPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showTableView, setShowTableView] = useState(false);
   const [parsedAbi, setParsedAbi] = useState<any[]>([]);
-  const [showTutorial, setShowTutorial] = useState(true); // State for showing tutorial/table view
+  const [showTutorial, setShowTutorial] = useState(true);
+  const [contractInterface, setContractInterface] = useState<string | null>(null);
 
   // Get all chain information
   const chainInfo = useMemo(() => {
@@ -253,6 +263,8 @@ const Home: NextPage = () => {
 
       const isBridge = isBridgeContract(parsedAbi);
       const isWrappable = isWrappableToken(parsedAbi);
+      const isERC20 = isERC20Contract(parsedAbi);
+      const isERC721 = isERC721Contract(parsedAbi);
 
       // Get the network ID from the selected network
       const selectedChain = (viemChains as any)[selectedNetwork.value];
@@ -293,25 +305,34 @@ const Home: NextPage = () => {
       }
       
       setIsContractLoaded(true);
+      setShowTableView(true);
+      setShowTutorial(false);
 
-      // Route based on contract type
+      // Set the appropriate interface based on contract type
       if (isWrappable) {
-        router.push('/wrap');
+        setContractInterface('wrap');
+        notification.success("Wrapped token contract detected!");
       } else if (isBridge) {
-        router.push('/bridge');
+        setContractInterface('bridge');
+        notification.success("Bridge contract detected!");
       } else if (isUniversalRouter) {
-        router.push('/swap');
-      } else if (isERC20Contract(parsedAbi)) {
-        router.push('/erc20');
-      } else if (isERC721Contract(parsedAbi)) {
-        router.push('/nft');
+        setContractInterface('swap');
+        notification.success("Router contract detected!");
+      } else if (isERC20) {
+        setContractInterface('erc20');
+        notification.success("ERC20 token contract detected!");
+      } else if (isERC721) {
+        setContractInterface('nft');
+        notification.success("NFT contract detected!");
       } else {
-        router.push('/readwrite');
+        setContractInterface('readwrite');
+        notification.success("Contract loaded successfully!");
       }
 
     } catch (error) {
       console.error('Error:', error);
-      alert('Error setting contract: ' + (error as Error).message);
+      notification.error('Error setting contract: ' + (error as Error).message);
+      setContractInterface(null);
     } finally {
       setIsLoading(false);
     }
@@ -509,9 +530,28 @@ const Home: NextPage = () => {
           </button>
         </div>
 
-        {/* Right Column - Tutorial or Table View */}
+        {/* Right Column - Tutorial, Table View, or Contract Interface */}
         <div className="md:w-1/2">
-          {showTableView ? (
+          {contractInterface ? (
+            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto">
+              <Suspense fallback={
+                <div className="p-6 text-center">
+                  <div className="flex justify-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                  <p className="mt-2">Loading contract interface...</p>
+                </div>
+              }>
+                {contractInterface === 'erc20' && <ERC20Interface />}
+                {contractInterface === 'nft' && <NFTInterface />}
+                {contractInterface === 'wrap' && <WrapInterface />}
+                {contractInterface === 'bridge' && <BridgeInterface />}
+                {contractInterface === 'readwrite' && <ReadWriteInterface />}
+              </Suspense>
+            </div>
+          ) : showTableView ? (
             <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto max-h-96">
               <table className="min-w-full divide-y divide-gray-700">
                 <thead className="bg-gray-800">
