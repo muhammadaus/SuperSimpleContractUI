@@ -393,61 +393,61 @@ const Home: NextPage = () => {
         {/* Left Column - Contract Input Form */}
         <div className="md:w-1/2">
           <div className="w-full mb-4">
-            <label htmlFor="networkSelector" className="block text-sm font-medium text-gray-300 mb-2">
-              Select Network:
-            </label>
-            <Select
-              id="networkSelector"
-              value={selectedNetwork}
-              options={options}
-              onChange={handleNetworkChange}
-              styles={{
-                control: (base) => ({
-                  ...base,
-                  backgroundColor: '#1f2937',
-                  borderColor: '#374151',
-                  color: '#fff',
-                  boxShadow: 'none',
-                  '&:hover': {
-                    borderColor: '#4b5563'
-                  }
-                }),
-                menu: (base) => ({
-                  ...base,
-                  backgroundColor: '#1f2937',
-                  border: '1px solid #374151'
-                }),
-                option: (base, state) => ({
-                  ...base,
-                  backgroundColor: state.isFocused ? '#374151' : '#1f2937',
-                  color: '#fff',
-                  '&:hover': {
-                    backgroundColor: '#374151'
-                  }
-                }),
-                singleValue: (base) => ({
-                  ...base,
-                  color: '#fff'
-                }),
-                input: (base) => ({
-                  ...base,
-                  color: '#fff'
-                })
-              }}
-              className="mt-1"
-            />
-          </div>
+        <label htmlFor="networkSelector" className="block text-sm font-medium text-gray-300 mb-2">
+          Select Network:
+        </label>
+        <Select
+          id="networkSelector"
+          value={selectedNetwork}
+          options={options}
+          onChange={handleNetworkChange}
+          styles={{
+            control: (base) => ({
+              ...base,
+              backgroundColor: '#1f2937',
+              borderColor: '#374151',
+              color: '#fff',
+              boxShadow: 'none',
+              '&:hover': {
+                borderColor: '#4b5563'
+              }
+            }),
+            menu: (base) => ({
+              ...base,
+              backgroundColor: '#1f2937',
+              border: '1px solid #374151'
+            }),
+            option: (base, state) => ({
+              ...base,
+              backgroundColor: state.isFocused ? '#374151' : '#1f2937',
+              color: '#fff',
+              '&:hover': {
+                backgroundColor: '#374151'
+              }
+            }),
+            singleValue: (base) => ({
+              ...base,
+              color: '#fff'
+            }),
+            input: (base) => ({
+              ...base,
+              color: '#fff'
+            })
+          }}
+          className="mt-1"
+        />
+      </div>
 
-          <input
-            type="text"
-            value={address}
-            onChange={handleAddressChange}
-            placeholder="Enter Smart Contract Address"
+      <input
+        type="text"
+        value={address}
+        onChange={handleAddressChange}
+        placeholder="Enter Smart Contract Address"
             className={`w-full my-4 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-              ${!isValidAddress ? 'border-red-500' : 'border-gray-700'}
-              text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
-              ${!isValidAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-          />
+          ${!isValidAddress ? 'border-red-500' : 'border-gray-700'}
+          text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+          ${!isValidAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+      />
 
           <div className="w-full mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -477,16 +477,16 @@ const Home: NextPage = () => {
               </div>
             </div>
 
-            <textarea
+      <textarea
               id="abiInput"
-              value={abi}
-              onChange={handleAbiChange}
-              placeholder="Enter Contract ABI (JSON format)"
+        value={abi}
+        onChange={handleAbiChange}
+        placeholder="Enter Contract ABI (JSON format)"
               className={`w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
-                ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
-                text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
-                ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
-              rows={8}
+          ${!isValidAbi ? 'border-red-500' : 'border-gray-700'}
+          text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+          ${!isValidAbi ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+        rows={8}
               style={{ fontFamily: 'monospace' }}
             />
             
@@ -497,29 +497,29 @@ const Home: NextPage = () => {
             )}
           </div>
 
-          <button
-            onClick={handleReadWrite}
-            disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
+      <button
+        onClick={handleReadWrite}
+        disabled={!isValidAddress || !isValidAbi || !address || !abi || isLoading}
             className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative mb-4
-              ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
-                ? 'bg-gray-700 cursor-not-allowed text-gray-400'
-                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
-              } font-medium`}
-          >
-            <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
-              Load Contract
-            </span>
-            
-            {isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-              </div>
-            )}
-          </button>
+          ${(!isValidAddress || !isValidAbi || !address || !abi || isLoading)
+            ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+            : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+          } font-medium`}
+      >
+        <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
+          Load Contract
+        </span>
+        
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex gap-1">
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+          </div>
+        )}
+      </button>
           
           {/* ABI Table View */}
           {showTableView && parsedAbi.length > 0 && (

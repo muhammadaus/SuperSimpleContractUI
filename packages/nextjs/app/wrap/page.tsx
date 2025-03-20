@@ -685,7 +685,6 @@ export default function Wrap() {
         <ul className="text-sm list-disc pl-5 space-y-1">
           <li><strong>wETH</strong>: Wrapped Ether, an ERC-20 version of ETH</li>
           <li><strong>wstETH</strong>: Wrapped stETH, which maintains a constant balance while stETH rebases</li>
-          <li><strong>wBTC</strong>: Wrapped Bitcoin, an ERC-20 representation of BTC</li>
         </ul>
       </div>
 
