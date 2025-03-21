@@ -4,10 +4,5 @@
   "outputDirectory": "packages/nextjs/.next",
   "rewrites": [
     { "source": "/(.*)", "destination": "/" }
-  ],
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/blockexplorer(/.*)?", "status": 404, "dest": "/404" },
-    { "src": "/(.*)", "dest": "/$1" }
   ]
 }
