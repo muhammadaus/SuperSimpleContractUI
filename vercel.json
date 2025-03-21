@@ -1,0 +1,6 @@
+{
+  "installCommand": "yarn install",
+  "buildCommand": "yarn vercel-build",
+  "outputDirectory": "packages/nextjs/.next",
+  "ignoreCommand": "cd packages/nextjs && git diff HEAD^ HEAD --quiet app/blockexplorer/"
+} 

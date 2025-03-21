@@ -1827,28 +1827,9 @@ contract MyContract {
           
           {/* Update the test button to add reinitialize option */}
           <div className="mt-4 space-y-2">
-            <button
-              onClick={testWalletConnection}
-              className="w-full px-6 py-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium flex justify-center items-center"
-            >
-              <QrCodeIcon className="mr-2 h-5 w-5" />
-              Test Wallet Connection
-            </button>
-            
-            <button
-              onClick={reinitializeAppKit}
-              className="w-full px-6 py-3 rounded-lg bg-gray-600 hover:bg-gray-700 text-white font-medium flex justify-center items-center"
-            >
-              <ArrowPathIcon className="mr-2 h-5 w-5" />
-              Force Reinitialize AppKit
-            </button>
             
             {/* Display QR modal state for debugging */}
             <div className="mt-3 p-3 rounded-lg bg-gray-800 text-gray-300 text-xs">
-              <div>Modal State: {isModalOpen ? '✅ Open' : '❌ Closed'}</div>
-              <div>Executing: {isExecuting ? '✅ Yes' : '❌ No'}</div>
-              <div>Deploying: {isDeploying ? '✅ Yes' : '❌ No'}</div>
-              <div>Target Network: {targetNetwork.name} (ID: {targetNetwork.id})</div>
             </div>
           </div>
 
