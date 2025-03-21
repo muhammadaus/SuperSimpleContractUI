@@ -1,6 +1,4 @@
 {
-  "version": 2,
-  "buildCommand": "cd packages/nextjs && yarn vercel-deploy",
-  "outputDirectory": "packages/nextjs/.next",
-  "ignoreCommand": "cd packages/nextjs && git diff HEAD^ HEAD --quiet app/blockexplorer/"
+  "buildCommand": "./build-for-vercel.sh",
+  "outputDirectory": "packages/nextjs/.next"
 } 

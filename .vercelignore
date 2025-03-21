@@ -2,7 +2,8 @@
 node_modules
 .pnp
 .pnp.js
-.yarn
+# Don't ignore .yarn directory as it contains the Yarn binary needed for builds
+# .yarn
 
 # Testing
 coverage
