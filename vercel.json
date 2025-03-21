@@ -1,6 +1,6 @@
 {
   "version": 2,
   "cleanUrls": true,
-  "buildCommand": "npm --prefix packages/nextjs install --no-package-lock && npm --prefix packages/nextjs run build",
+  "buildCommand": "bash ./build-for-vercel.sh",
   "outputDirectory": "packages/nextjs/.next"
 } 

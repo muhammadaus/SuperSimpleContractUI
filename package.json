@@ -36,7 +36,7 @@
     "vercel": "yarn workspace @se-2/nextjs vercel",
     "vercel:yolo": "yarn workspace @se-2/nextjs vercel:yolo",
     "prepare": "husky install",
-    "vercel-build": "cd packages/nextjs && npm install --no-package-lock && npm run build"
+    "vercel-build": "bash ./build-for-vercel.sh"
   },
   "packageManager": "yarn@3.2.3",
   "devDependencies": {
