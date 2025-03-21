@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "build": "next build",
+    "vercel-build": "next build",
+    "build-static": "node scripts/build-static.js",
+    "build-next": "next build",
+    "lint": "next lint",
+    "format": "prettier --write . '!(node_modules|.next|contracts)/**/*'",
+    "check-mocks": "node scripts/check-mocks.js"
   },
   "dependencies": {
     "@heroicons/react": "^2.0.11",

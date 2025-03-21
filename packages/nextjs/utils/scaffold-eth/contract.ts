@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { Chain } from 'viem/chains';
 
+export enum ContractCodeStatus {
+  LOADING = "loading",
+  DEPLOYED = "deployed",
+  NOT_FOUND = "not-found"
+}
+
 export type GenericContractsDeclaration = {
   [chainId: number]: {
     [contractName: string]: {
@@ -10,6 +16,16 @@ export type GenericContractsDeclaration = {
         [key: string]: string;
       };
     };
+  };
+};
+
+export type ContractName = string;
+
+export type Contract<TContractName extends ContractName = ContractName> = {
+  address: `0x${string}`;
+  abi: any[];
+  inheritedFunctions?: {
+    [key: string]: string;
   };
 };
 

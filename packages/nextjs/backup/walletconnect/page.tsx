@@ -2,9 +2,8 @@
 
 import React from 'react';
 import { AppKitWallet } from '../../components/scaffold-eth/AppKitWallet';
-import ClientOnly from '../components/ClientOnly';
 
-function WalletConnectComponent() {
+export default function WalletConnectPage() {
   return (
     <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
       <div className="text-center">
@@ -37,13 +36,5 @@ function WalletConnectComponent() {
         </ol>
       </div>
     </div>
-  );
-}
-
-export default function WalletConnectPage() {
-  return (
-    <ClientOnly fallback={<div className="container mx-auto p-4">Loading wallet connect interface...</div>}>
-      <WalletConnectComponent />
-    </ClientOnly>
   );
 } 

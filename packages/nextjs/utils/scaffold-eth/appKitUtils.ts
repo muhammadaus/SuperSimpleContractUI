@@ -1,59 +1,29 @@
-import { createAppKit } from '@reown/appkit/react';
-import { EthersAdapter } from '@reown/appkit-adapter-ethers';
-import { mainnet, sepolia, arbitrum } from '@reown/appkit/networks';
-import type { AppKitNetwork } from '@reown/appkit/networks';
-
-// Define your project configuration
-// You need to get a project ID from https://cloud.walletconnect.com/
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
-
-// Define metadata for your application
-const metadata = {
-  name: 'PureContracts',
-  description: 'Secure and transparent smart contract interactions',
-  url: typeof window !== 'undefined' ? window.location.origin : 'https://purecontracts.com',
-  icons: ['https://purecontracts.com/logo.png'], // Replace with your actual logo URL
-};
-
-// Create ethers adapter
-const ethersAdapter = new EthersAdapter();
-
-// Define supported networks - must use the format [AppKitNetwork, ...AppKitNetwork[]]
-export const networks = [mainnet, arbitrum, sepolia] as [AppKitNetwork, ...AppKitNetwork[]];
-
 /**
- * Initialize AppKit for the application
- * This should be called once at the application startup
+ * Mock implementation of appKitUtils for server-side rendering compatibility
  */
-export function initializeAppKit() {
-  if (typeof window === 'undefined') return;
-  
-  if (!projectId) {
-    console.error('WalletConnect Project ID is not defined. Please set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID in your environment variables.');
-    console.error('Get a project ID from https://cloud.walletconnect.com/');
+
+let isInitialized = false;
+
+export const initializeAppKit = () => {
+  // Skip initialization if already done or if we're in a server environment
+  if (isInitialized || typeof window === 'undefined') {
     return;
   }
 
   try {
-    createAppKit({
-      adapters: [ethersAdapter],
-      networks,
-      metadata,
-      projectId,
-      themeMode: 'dark',
-      features: {
-        analytics: true,
-      },
-      themeVariables: {
-        '--w3m-accent': '#3b82f6', // Blue color to match your UI
-      },
-    });
+    // Initialize AppKit only on client-side
+    console.log('Initializing AppKit (mock)');
     
-    console.log('AppKit initialized successfully');
+    // Mock the initialization
+    isInitialized = true;
   } catch (error) {
-    console.error('Failed to initialize AppKit:', error);
+    console.error('Error initializing AppKit:', error);
   }
-}
+};
+
+export const isAppKitInitialized = () => {
+  return isInitialized;
+};
 
 /**
  * Get the current connected account

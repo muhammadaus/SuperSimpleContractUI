@@ -10,7 +10,6 @@ import { useContractStore } from "../../utils/scaffold-eth/contract";
 import { TOKEN_LIST } from "../../utils/scaffold-eth/tokens";
 import { useDeployedContractInfo } from "../../hooks/scaffold-eth/useDeployedContractInfo";
 import { notification } from "../../utils/scaffold-eth/notification";
-import ClientOnly from '../components/ClientOnly';
 
 // Add window.ethereum type declaration
 declare global {
@@ -77,7 +76,7 @@ interface TokenOption {
   isCustom?: boolean;
 }
 
-function SwapComponent() {
+export default function Swap() {
   // Mock user address for now
   const userAddress = "0x0000000000000000000000000000000000000000";
   const { targetNetwork } = useTargetNetwork();
@@ -596,13 +595,5 @@ function SwapComponent() {
         </button>
       </div>
     </div>
-  );
-}
-
-export default function Swap() {
-  return (
-    <ClientOnly fallback={<div className="container mx-auto p-4">Loading swap interface...</div>}>
-      <SwapComponent />
-    </ClientOnly>
   );
 } 

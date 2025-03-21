@@ -1,5 +1,6 @@
-import { ReadWrite } from "./_components/ReadWrite";
-import type { NextPage } from "next";
+import React from 'react';
+import ClientOnly from '../components/ClientOnly';
+import dynamic from 'next/dynamic';
 import { getMetadata } from "../../utils/scaffold-eth/getMetadata";
 
 export const metadata = getMetadata({
@@ -7,12 +8,16 @@ export const metadata = getMetadata({
   description: "Interact with your deployed contracts in an easy way",
 });
 
-const Debug: NextPage = () => {
-  return (
-    <>
-      <ReadWrite />
-    </>
-  );
-};
+// Use dynamic import with SSR disabled to prevent server-side rendering issues
+const ReadWriteComponent = dynamic(
+  () => import('./_components/ReadWrite'),
+  { ssr: false }
+);
 
-export default Debug;
+export default function ReadWritePage() {
+  return (
+    <ClientOnly fallback={<div className="container mx-auto p-4">Loading contract interface...</div>}>
+      <ReadWriteComponent />
+    </ClientOnly>
+  );
+}

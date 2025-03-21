@@ -9,7 +9,6 @@ import { notification } from "../../utils/scaffold-eth/notification";
 import { useRouter } from 'next/navigation';
 import { useQRTransactionFlow } from '../../hooks/scaffold-eth/useQRTransactionFlow';
 import { QrCodeIcon } from '@heroicons/react/24/outline';
-import ClientOnly from '../components/ClientOnly';
 
 // Add window.ethereum type declaration
 declare global {
@@ -32,7 +31,7 @@ interface TokenInfo {
   description: string;
 }
 
-function WrapComponent() {
+export default function Wrap() {
   const router = useRouter();
   const [amount, setAmount] = useState('');
   const [isWrapping, setIsWrapping] = useState(true); // true = wrap, false = unwrap
@@ -515,9 +514,19 @@ function WrapComponent() {
   }
 
   return (
-    <div className="container mx-auto px-6 py-8">
-      <h1 className="text-4xl font-bold mb-8">Wrap/Unwrap Tokens</h1>
-      
+    <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
+      <div className="text-center">
+        <h1>
+          <span className="block text-2xl mb-2 text-gray-300">Token</span>
+          <span className="block text-4xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+            Wrapper
+          </span>
+        </h1>
+        <p className="text-lg text-gray-300 mt-2">
+          Wrap and unwrap tokens for DeFi compatibility
+        </p>
+      </div>
+
       {/* Token Selection */}
       <div className="w-full max-w-md mt-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
         <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
@@ -682,13 +691,5 @@ function WrapComponent() {
       {/* Render QR Transaction Modal */}
       <QRTransactionModalComponent />
     </div>
-  );
-}
-
-export default function Wrap() {
-  return (
-    <ClientOnly fallback={<div className="container mx-auto p-4">Loading wrap/unwrap interface...</div>}>
-      <WrapComponent />
-    </ClientOnly>
   );
 } 
