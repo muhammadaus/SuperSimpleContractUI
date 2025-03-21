@@ -13,6 +13,10 @@ const nextConfig = {
     config.resolve.fallback = { fs: false, net: false, tls: false };
     config.externals.push("pino-pretty", "lokijs", "encoding");
     return config;
+  },
+  // Expose the ALCHEMY_RPC_URL as an environment variable to the browser
+  env: {
+    ALCHEMY_RPC_URL: process.env.ALCHEMY_RPC_URL,
   }
 };
 

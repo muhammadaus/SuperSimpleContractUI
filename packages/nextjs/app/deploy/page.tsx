@@ -191,95 +191,78 @@ const tryAlternativeDeployment = async (
 ): Promise<`0x${string}`> => {
   console.log("Attempting alternative deployment method...");
   
-  // Enhanced RPC fallback with more public options
-  const rpcUrls = [
-    // Primary URL from the selected chain
-    selectedChain.rpcUrls.default.http[0],
-    
-    // Network-specific alternatives
-    ...(selectedChain.id === 1 ? [
-      'https://eth.llamarpc.com',
-      'https://rpc.ankr.com/eth',
-      'https://ethereum.publicnode.com',
-      'https://1rpc.io/eth'
-    ] : []),
-    
-    ...(selectedChain.id === 11155111 ? [
-      'https://ethereum-sepolia.publicnode.com',
-      'https://rpc.sepolia.org',
-      'https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
-      'https://rpc.ankr.com/eth_sepolia',
-      'https://rpc-sepolia.rockx.com'
-    ] : []),
-    
-    ...(selectedChain.id === 42161 ? [
-      'https://arb1.arbitrum.io/rpc',
-      'https://arbitrum-one.publicnode.com',
-      'https://arbitrum-mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'
-    ] : []),
-  ].filter(Boolean) as string[];
+  // Enhanced RPC setup for different networks
+  let rpcUrl = '';
   
-  console.log(`Trying ${rpcUrls.length} alternative RPC URLs`);
-  
-  // Use fallback transport to try multiple RPCs
-  const transport = fallback(
-    rpcUrls.map(url => http(url, {
-      timeout: 15000,  // 15 second timeout for each RPC
-      fetchOptions: {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'viem/PureContracts'
-        },
-      },
-    }))
-  );
-  
-  // Create a public client with the fallback transport
-  const publicClient = createPublicClient({
-    chain: selectedChain,
-    transport: transport
-  });
+  // For Sepolia, use Alchemy URL only since public RPCs are unreliable
+  if (selectedChain.id.toString() === '11155111') {
+    rpcUrl = process.env.ALCHEMY_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/mnvC3BfLvzJlyk82vCLgBCD1gVCg_XX9';
+    console.log("Using Alchemy RPC for Sepolia deployment");
+  } else {
+    // For other networks, use the chain's default RPC
+    rpcUrl = selectedChain.rpcUrls.default.http[0];
+    console.log(`Using default RPC for ${selectedChain.name} deployment`);
+  }
   
   try {
-    // If wallet provider is available, try using it with a custom transport
+    // Simplified approach: Use only the wallet provider for transaction
     if (walletProvider) {
-      console.log("Using wallet provider with customTransport for deployment");
+      console.log("Using wallet provider for deployment (simplified approach)");
+      
+      // Create a wallet client with the wallet provider
       const walletClient = createWalletClient({
         account: address,
         chain: selectedChain,
         transport: customTransport(walletProvider)
       });
       
-      // Attempt deployment with the wallet client
-      const txHash = await walletClient.deployContract({
-        abi: [],
+      // Send transaction directly using sendTransaction (contract creation)
+      const txHash = await walletClient.sendTransaction({
         account: address,
-        bytecode: bytecode,
-        value: value,
+        to: undefined, // Contract creation
+        data: bytecode,
+        value,
         gas: gasLimit,
         nonce,
+        chain: selectedChain, // Explicitly specify chain to avoid chain mismatch
       });
       
       console.log("Alternative deployment successful with hash:", txHash);
       return txHash;
     } else {
-      // If no wallet provider, use public client to create and send raw transaction
-      console.log("Creating wallet client with http transport for deployment");
+      // Fallback to HTTP transport if wallet provider is not available
+      console.log("Wallet provider not available, using HTTP transport as fallback");
       
-      const walletClient = createWalletClient({
-        account: address,
-        chain: selectedChain,
-        transport: transport
+      // Create HTTP transport with increased timeout
+      const transport = http(rpcUrl, {
+        timeout: 60000, // 60 second timeout
+        fetchOptions: {
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'viem/PureContracts'
+          },
+        },
       });
       
-      // Send with wallet client using deployContract method
-      const txHash = await walletClient.deployContract({
-        abi: [],
-        account: address,
-        bytecode: bytecode,
-        value: value,
+      // Create wallet client with private key account if available, otherwise use the address
+      const privateKey = process.env.DEPLOYER_PRIVATE_KEY as `0x${string}` | undefined;
+      const account = privateKey ? privateKeyToAccount(privateKey) : address;
+      
+      const walletClient = createWalletClient({
+        account,
+        chain: selectedChain,
+        transport
+      });
+      
+      // Send transaction directly using sendTransaction (contract creation)
+      const txHash = await walletClient.sendTransaction({
+        account,
+        to: undefined, // Contract creation
+        data: bytecode,
+        value,
         gas: gasLimit,
         nonce,
+        chain: selectedChain, // Explicitly specify chain to avoid chain mismatch
       });
       
       console.log("Alternative deployment successful with hash:", txHash);
@@ -486,13 +469,70 @@ export default function DeployPage() {
         if (address) {
           setUserAddress(address);
           
-          // If there's a pending deployment and we just got connected, proceed with deployment right away
+          // If there's a pending deployment and we just got connected, proceed with deployment
           if (window.sessionStorage.getItem('pendingDeployment') === 'true' && bytecode) {
             console.log("Detected pending deployment after connection, proceeding with deployment");
+            
+            // Get the target chain ID from session storage
+            const targetChainId = window.sessionStorage.getItem('pendingDeploymentChainId');
+            
+            // Clear the pending deployment flags
             window.sessionStorage.removeItem('pendingDeployment');
-            setTimeout(() => {
-              executeDeployment();
-            }, 500); // Small delay to ensure wallet is fully connected
+            window.sessionStorage.removeItem('pendingDeploymentChainId');
+            
+            // Check if wallet is on the correct chain first
+            if (walletProvider && walletProvider.request) {
+              (async () => {
+                try {
+                  // Get current chain ID
+                  const chainIdHex = await walletProvider.request({ method: 'eth_chainId', params: [] });
+                  const currentChainId = parseInt(chainIdHex, 16);
+                  
+                  console.log(`Current chain ID: ${currentChainId}, Expected chain ID: ${targetChainId}`);
+                  
+                  // If chains don't match, try to switch chain first
+                  if (targetChainId && currentChainId !== parseInt(targetChainId)) {
+                    console.log(`Chain mismatch detected. Attempting to switch to chain ID ${targetChainId}...`);
+                    notification.info(`Switching your wallet to the correct network (Chain ID: ${targetChainId})`);
+                    
+                    try {
+                      // Try to switch chains automatically
+                      await walletProvider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: `0x${parseInt(targetChainId).toString(16)}` }],
+                      });
+                      
+                      // Small delay to ensure wallet has updated
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      
+                      // Now proceed with deployment
+                      setTimeout(() => {
+                        executeDeployment();
+                      }, 500);
+                    } catch (switchError) {
+                      console.error("Failed to switch networks:", switchError);
+                      notification.error("Could not switch networks. Please switch manually and try again.");
+                    }
+                  } else {
+                    // If already on correct chain, proceed with deployment
+                    setTimeout(() => {
+                      executeDeployment();
+                    }, 500); // Small delay to ensure wallet is fully connected
+                  }
+                } catch (chainError) {
+                  console.error("Error checking chain:", chainError);
+                  // Proceed anyway as a fallback
+                  setTimeout(() => {
+                    executeDeployment();
+                  }, 500);
+                }
+              })();
+            } else {
+              // Fallback if wallet provider not available
+              setTimeout(() => {
+                executeDeployment();
+              }, 500);
+            }
           }
         }
       }
@@ -554,7 +594,7 @@ export default function DeployPage() {
       }
 
       // Set gas parameters
-      const gasLimitValue = gasLimit ? BigInt(parseInt(gasLimit)) : BigInt(3000000);
+      let gasLimitValue = gasLimit ? BigInt(parseInt(gasLimit)) : BigInt(3000000);
       const gasPriorityValue = gasPriority ? parseFloat(gasPriority) : undefined;
       
       // Prepare transaction
@@ -632,9 +672,28 @@ export default function DeployPage() {
         // Try to estimate gas before sending
         try {
           console.log("Attempting to estimate gas for deployment...");
+          
+          // Create a public client to use for gas estimation and transaction watching
+          addDeploymentLog("Creating public client for gas estimation");
+          
+          // Use Alchemy RPC for Sepolia to avoid timeouts
+          let rpcUrl = selectedChain.rpcUrls.default.http[0];
+          if (selectedChain.id.toString() === '11155111') {
+            rpcUrl = process.env.ALCHEMY_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/mnvC3BfLvzJlyk82vCLgBCD1gVCg_XX9';
+            addDeploymentLog(`Using Alchemy RPC for Sepolia: ${rpcUrl}`);
+          }
+          
           const publicClient = createPublicClient({
             chain: selectedChain,
-            transport: http()
+            transport: http(rpcUrl, {
+              timeout: 30000, // 30 second timeout
+              fetchOptions: {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'viem/PureContracts'
+                },
+              },
+            })
           });
           
           const gasEstimate = await publicClient.estimateGas({
@@ -650,8 +709,19 @@ export default function DeployPage() {
           
           if (gasEstimate) {
             console.log(`Gas estimation successful: ${gasEstimate.toString()} units`);
-            // Update gas limit if estimation succeeded
-            txData.gas = `0x${gasEstimate.toString(16)}`;
+            // Add 30% buffer for Sepolia to avoid out-of-gas errors
+            if (selectedChain.id.toString() === '11155111') {
+              const bufferedGas = gasEstimate * BigInt(130) / BigInt(100);
+              addDeploymentLog(`Adding 30% buffer to gas estimate for Sepolia: ${bufferedGas.toString()} units`);
+              txData.gas = `0x${bufferedGas.toString(16)}`;
+              gasLimitValue = bufferedGas;
+            } else {
+              // For other chains, add 10% buffer
+              const bufferedGas = gasEstimate * BigInt(110) / BigInt(100);
+              addDeploymentLog(`Adding 10% buffer to gas estimate: ${bufferedGas.toString()} units`);
+              txData.gas = `0x${bufferedGas.toString(16)}`;
+              gasLimitValue = bufferedGas;
+            }
           } else {
             console.warn("Could not estimate gas, using default limit");
           }
@@ -785,9 +855,25 @@ export default function DeployPage() {
           try {
             // Create a public client to use for gas estimation and transaction watching
             addDeploymentLog("Creating public client for gas estimation");
+            
+            // Use Alchemy RPC for Sepolia to avoid timeouts
+            let rpcUrl = selectedChain.rpcUrls.default.http[0];
+            if (selectedChain.id.toString() === '11155111') {
+              rpcUrl = process.env.ALCHEMY_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/mnvC3BfLvzJlyk82vCLgBCD1gVCg_XX9';
+              addDeploymentLog(`Using Alchemy RPC for Sepolia: ${rpcUrl}`);
+            }
+            
             const publicClient = createPublicClient({
               chain: selectedChain,
-              transport: http(selectedChain.rpcUrls.default.http[0])
+              transport: http(rpcUrl, {
+                timeout: 30000, // 30 second timeout
+                fetchOptions: {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'viem/PureContracts'
+                  },
+                },
+              })
             });
             
             // Get nonce for the transaction
@@ -816,7 +902,9 @@ export default function DeployPage() {
                     : undefined,
                   gas: gasLimitValue,
                   nonce,
-                  chain: selectedChain,
+                  chain: selectedChain, // Explicitly include chain to prevent chain mismatch
+                  maxFeePerGas: undefined, // Let wallet determine automatically
+                  maxPriorityFeePerGas: undefined, // Let wallet determine automatically
                 });
               } catch (primaryDeployError) {
                 console.error("Primary deployment method failed:", primaryDeployError);
@@ -1011,36 +1099,107 @@ export default function DeployPage() {
 
   // Modify deployContract to handle connection flow first
   const deployContract = async () => {
-    console.log("Deploy contract called");
+    console.log("Starting contract deployment process...");
     
-    if (!bytecode) {
-      notification.error("Bytecode is required");
-      return;
-    }
-
-    if (!isBytecodeValid) {
+    if (!bytecode || !isBytecodeValid) {
       notification.error("Invalid bytecode format");
       return;
     }
     
-    // Check if we need to connect a wallet first
-    if (!isConnected || !address) {
-      console.log("Opening AppKit for wallet connection");
-      try {
-        // Set flag to indicate we want to deploy after connection
-        window.sessionStorage.setItem('pendingDeployment', 'true');
-        openAppKit();
-        notification.info("Please connect your wallet to continue");
-      } catch (error) {
-        console.error("Error opening AppKit:", error);
-        notification.error("Failed to open wallet connection modal");
-        window.sessionStorage.removeItem('pendingDeployment');
-      }
-      return; // Wait for connection before proceeding
+    // Get the selected chain ID first
+    const selectedChain = (viemChains as any)[selectedNetwork.value];
+    if (!selectedChain) {
+      notification.error("Invalid network selected");
+      return;
     }
     
-    // If already connected, execute deployment immediately
-    executeDeployment();
+    // Check if wallet is connected, if not prompt to connect
+    if (!isConnected || !address) {
+      notification.info("Please connect your wallet first");
+      try {
+        // Store flag and chain ID to continue deployment after connection
+        window.sessionStorage.setItem('pendingDeployment', 'true');
+        window.sessionStorage.setItem('pendingDeploymentChainId', selectedChain.id.toString());
+        console.log(`Stored pending deployment with chain ID: ${selectedChain.id}`);
+        openAppKit();
+        return;
+      } catch (error) {
+        console.error("Error opening wallet:", error);
+        notification.error("Could not open wallet connection");
+        return;
+      }
+    }
+    
+    // Check if wallet is on the correct chain
+    try {
+      if (walletProvider && walletProvider.request) {
+        // Get current chain ID
+        const chainIdHex = await walletProvider.request({ method: 'eth_chainId', params: [] });
+        const currentChainId = parseInt(chainIdHex, 16);
+        
+        console.log(`Current chain ID: ${currentChainId}, Target chain ID: ${selectedChain.id}`);
+        
+        // If chains don't match, ask user to switch networks
+        if (currentChainId !== selectedChain.id) {
+          notification.info(`Please switch your wallet to ${selectedChain.name} (Chain ID: ${selectedChain.id})`);
+          
+          try {
+            // Try to switch chains automatically
+            await walletProvider.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: `0x${selectedChain.id.toString(16)}` }],
+            });
+            
+            notification.success(`Switched to ${selectedChain.name}`);
+            
+            // Small delay to ensure wallet has updated
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (switchError: any) {
+            // This error code indicates that the chain has not been added to the wallet
+            if (switchError.code === 4902 || switchError.message?.includes('wallet_addEthereumChain')) {
+              try {
+                await walletProvider.request({
+                  method: 'wallet_addEthereumChain',
+                  params: [
+                    {
+                      chainId: `0x${selectedChain.id.toString(16)}`,
+                      chainName: selectedChain.name,
+                      nativeCurrency: {
+                        name: selectedChain.nativeCurrency.name,
+                        symbol: selectedChain.nativeCurrency.symbol,
+                        decimals: selectedChain.nativeCurrency.decimals
+                      },
+                      rpcUrls: selectedChain.rpcUrls.default.http,
+                      blockExplorerUrls: selectedChain.blockExplorers ? 
+                        [selectedChain.blockExplorers.default.url] : undefined
+                    },
+                  ],
+                });
+                
+                notification.success(`Added and switched to ${selectedChain.name}`);
+                
+                // Small delay to ensure wallet has updated
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              } catch (addError) {
+                console.error("Error adding chain:", addError);
+                notification.error(`Could not add ${selectedChain.name} to your wallet. Please switch manually.`);
+                return;
+              }
+            } else {
+              console.error("Error switching chains:", switchError);
+              notification.error("Could not switch networks. Please switch manually in your wallet.");
+              return;
+            }
+          }
+        }
+      }
+    } catch (chainError) {
+      console.error("Error checking chain:", chainError);
+      notification.info("Could not verify current network. Attempting deployment anyway.");
+    }
+    
+    // Proceed with deployment
+    await executeDeployment();
   };
 
   // Ensure Sourcify verification function is properly defined
