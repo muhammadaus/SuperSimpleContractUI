@@ -36,26 +36,76 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     // Create ethers adapter
     const ethersAdapter = new EthersAdapter();
     
-    // Define supported networks
-    const networks = [mainnet, arbitrum, sepolia] as [AppKitNetwork, ...AppKitNetwork[]];
+    // Generate AppKit networks from all available viem chains
+    const viemChainsArray = Object.values(viemChains).filter(
+      (chain): chain is typeof viemChains.mainnet => 
+        typeof chain === 'object' && 
+        chain !== null && 
+        'id' in chain && 
+        typeof chain.id === 'number'
+    );
     
-    createAppKit({
-      adapters: [ethersAdapter],
-      networks,
-      metadata,
-      projectId,
-      themeMode: 'dark',
-      features: {
-        analytics: true,
+    // Convert viem chains to AppKit networks
+    const appKitNetworks: AppKitNetwork[] = viemChainsArray.map(chain => ({
+      id: chain.id,
+      name: chain.name || `Chain ${chain.id}`,
+      rpcUrls: {
+        default: {
+          http: chain.rpcUrls?.default?.http || [`https://rpc.ankr.com/${chain.id}`]
+        }
       },
-      themeVariables: {
-        '--w3m-accent': '#3b82f6', // Blue color to match your UI
+      nativeCurrency: {
+        name: chain.nativeCurrency?.name || 'Ether',
+        symbol: chain.nativeCurrency?.symbol || 'ETH',
+        decimals: chain.nativeCurrency?.decimals || 18,
       },
-    });
+      blockExplorers: chain.blockExplorers?.default 
+        ? {
+            default: {
+              url: chain.blockExplorers.default.url,
+              name: chain.blockExplorers.default.name || 'Explorer'
+            }
+          }
+        : {
+            default: {
+              url: `https://etherscan.io`,
+              name: 'Explorer'
+            }
+          }
+    }));
+    
+    // Ensure we have at least mainnet as the first item
+    const mainnetNetwork = appKitNetworks.find(n => n.id === 1);
+    if (mainnetNetwork) {
+      // Move mainnet to the beginning of the array
+      const filteredNetworks = appKitNetworks.filter(n => n.id !== 1);
+      const networks = [mainnetNetwork, ...filteredNetworks] as [AppKitNetwork, ...AppKitNetwork[]];
+      
+      console.log(`Initializing AppKit with ${networks.length} networks`);
+      console.log('Networks included:', networks.map(n => `${n.name} (${n.id})`).slice(0, 5), '...');
+      
+      createAppKit({
+        adapters: [ethersAdapter],
+        networks,
+        metadata,
+        projectId,
+        themeMode: 'dark',
+        features: {
+          analytics: true,
+        },
+        themeVariables: {
+          // Theme customization if needed
+        },
+      });
+    } else {
+      throw new Error("Mainnet network not found in viem chains");
+    }
+    
+    // Mark as initialized
     (window as any).__APPKIT_INITIALIZED__ = true;
-    console.log('AppKit initialized successfully');
+    console.log('AppKit initialized in bridge interface');
   } catch (error) {
-    console.error('AppKit initialization failed:', error);
+    console.error('Error initializing AppKit:', error);
   }
 }
 
@@ -107,43 +157,60 @@ export default function BridgeInterface() {
     }
   }, [address, isConnected]);
 
-  // Check for pending bridge transactions on startup
+  // Check for pending transactions when wallet connects
   useEffect(() => {
     const checkPendingBridge = () => {
-      if (typeof window === 'undefined') return;
-      
-      const pendingBridge = window.sessionStorage.getItem('pendingBridge');
-      if (pendingBridge) {
-        try {
-          const { recipientAddress: savedRecipient, amount: savedAmount, 
-                 targetChainId: savedChainId, inputTokenAddress: savedInputToken } = JSON.parse(pendingBridge);
-          
-          setRecipientAddress(savedRecipient || '');
-          setAmount(savedAmount || '');
-          setTargetChainId(savedChainId || '84532');
-          setInputTokenAddress(savedInputToken || '');
-          
-          // Only clear the data if we have a wallet connected
-          if (address) {
-            window.sessionStorage.removeItem('pendingBridge');
-            notification.info("Restored your pending bridge transaction");
+      if (isConnected && address && typeof window !== 'undefined') {
+        const pendingBridge = window.sessionStorage.getItem('pendingBridge');
+        
+        if (pendingBridge) {
+          try {
+            const txData = JSON.parse(pendingBridge);
             
-            // If we have all the necessary data, attempt to continue the bridge
-            if (savedRecipient && savedAmount && savedChainId) {
-              setTimeout(() => {
-                handleBridge();
-              }, 1000);
-            }
+            // Apply the stored transaction data
+            if (txData.recipientAddress) setRecipientAddress(txData.recipientAddress);
+            if (txData.amount) setAmount(txData.amount);
+            if (txData.targetChainId) setTargetChainId(txData.targetChainId);
+            if (txData.inputTokenAddress) setInputTokenAddress(txData.inputTokenAddress);
+            
+            // Clear the stored transaction
+            window.sessionStorage.removeItem('pendingBridge');
+          } catch (error) {
+            console.error("Error parsing pending bridge transaction:", error);
+            window.sessionStorage.removeItem('pendingBridge');
           }
-        } catch (error) {
-          console.error("Error restoring pending bridge:", error);
-          window.sessionStorage.removeItem('pendingBridge');
         }
       }
     };
     
     checkPendingBridge();
   }, [address, isConnected]);
+  
+  // Clear any stale connection flags on component mount and when connection status changes
+  useEffect(() => {
+    // Check for stale connection flags
+    if (typeof window !== 'undefined') {
+      const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
+      const connectionTimestamp = window.sessionStorage.getItem('walletConnectionTimestamp');
+      
+      // If connection was initiated more than 2 minutes ago or user is now connected, clear the flag
+      if (connectionInProgress) {
+        const now = Date.now();
+        const timestamp = connectionTimestamp ? parseInt(connectionTimestamp, 10) : 0;
+        
+        if (isConnected || now - timestamp > 120000 || !connectionTimestamp) {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+        }
+      }
+    }
+    
+    // If user is connected, ensure connection flags are cleared
+    if (isConnected && typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('walletConnectionInProgress');
+      window.sessionStorage.removeItem('walletConnectionTimestamp');
+    }
+  }, [isConnected]);
 
   // Check and switch chain if needed using walletProvider
   const checkAndSwitchChain = async () => {
@@ -156,49 +223,75 @@ export default function BridgeInterface() {
       console.log(`Current chain ID: ${currentChainId}, Target chain ID: ${targetNetwork.id}`);
       
       if (currentChainId !== targetNetwork.id) {
-        notification.info(`Please switch your wallet to ${targetNetwork.name} (Chain ID: ${targetNetwork.id})`);
+        notification.info(`Switching to ${targetNetwork.name} network...`);
         
         try {
+          // First try to switch to the chain
           await walletProvider.request({
             method: 'wallet_switchEthereumChain',
             params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
           });
           
-          notification.success(`Switched to ${targetNetwork.name}`);
+          notification.success(`Switched to ${targetNetwork.name}!`);
           await new Promise(resolve => setTimeout(resolve, 1000));
           return true;
         } catch (switchError: any) {
-          if (switchError.code === 4902 || switchError.message?.includes('wallet_addEthereumChain')) {
+          // If the chain hasn't been added to the wallet yet, try to add it
+          if (switchError.code === 4902 || 
+              switchError.message?.includes('wallet_addEthereumChain') ||
+              switchError.message?.includes('Unrecognized chain ID')) {
             try {
+              // Find the chain details from viem
+              const viemChain = Object.values(viemChains).find(
+                (chain) => typeof chain === 'object' && 
+                          chain !== null && 
+                          'id' in chain && 
+                          chain.id === targetNetwork.id
+              );
+              
+              if (!viemChain || typeof viemChain !== 'object') {
+                throw new Error(`Chain with ID ${targetNetwork.id} not found in viem chains`);
+              }
+              
+              // Add the chain to the wallet
               await walletProvider.request({
                 method: 'wallet_addEthereumChain',
-                params: [
-                  {
-                    chainId: `0x${targetNetwork.id.toString(16)}`,
-                    chainName: targetNetwork.name,
-                    nativeCurrency: {
-                      name: targetNetwork.nativeCurrency.name,
-                      symbol: targetNetwork.nativeCurrency.symbol,
-                      decimals: targetNetwork.nativeCurrency.decimals
-                    },
-                    rpcUrls: targetNetwork.rpcUrls.default.http,
-                    blockExplorerUrls: targetNetwork.blockExplorers ? 
-                      [targetNetwork.blockExplorers.default.url] : undefined
+                params: [{
+                  chainId: `0x${targetNetwork.id.toString(16)}`,
+                  chainName: targetNetwork.name,
+                  nativeCurrency: {
+                    name: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                      viemChain.nativeCurrency.name : 'Ether',
+                    symbol: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                      viemChain.nativeCurrency.symbol : 'ETH',
+                    decimals: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                      viemChain.nativeCurrency.decimals : 18
                   },
-                ],
+                  rpcUrls: 'rpcUrls' in viemChain && 
+                           viemChain.rpcUrls && 
+                           'default' in viemChain.rpcUrls && 
+                           'http' in viemChain.rpcUrls.default ? 
+                             viemChain.rpcUrls.default.http : 
+                             [`https://rpc.ankr.com/${targetNetwork.id}`],
+                  blockExplorerUrls: 'blockExplorers' in viemChain && 
+                                     viemChain.blockExplorers && 
+                                     'default' in viemChain.blockExplorers ? 
+                                       [viemChain.blockExplorers.default.url] : 
+                                       ['https://etherscan.io']
+                }]
               });
               
               notification.success(`Added and switched to ${targetNetwork.name}`);
               await new Promise(resolve => setTimeout(resolve, 1000));
               return true;
             } catch (addError) {
-              console.error("Error adding chain:", addError);
-              notification.error(`Could not add ${targetNetwork.name} to your wallet. Please switch manually.`);
+              console.error("Error adding chain to wallet:", addError);
+              notification.error(`Could not add ${targetNetwork.name} to your wallet`);
               return false;
             }
           } else {
-            console.error("Error switching chains:", switchError);
-            notification.error("Could not switch networks. Please switch manually in your wallet.");
+            console.error("Error switching chain:", switchError);
+            notification.error(`Could not switch to ${targetNetwork.name}`);
             return false;
           }
         }
@@ -206,8 +299,8 @@ export default function BridgeInterface() {
       return true; // Already on the correct chain
     } catch (chainError) {
       console.error("Error checking chain:", chainError);
-      notification.info("Could not verify current network. Attempting bridge anyway.");
-      return true; // Proceed anyway
+      notification.error(`Could not verify current network: ${(chainError as Error).message}`);
+      return false;
     }
   };
 
@@ -306,14 +399,40 @@ export default function BridgeInterface() {
           console.log("Stored pending bridge transaction");
         }
         
+        // Set a flag to indicate connection is in progress
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('walletConnectionInProgress', 'true');
+          window.sessionStorage.setItem('walletConnectionTimestamp', Date.now().toString());
+        }
+        
         // Open AppKit to connect wallet
         openAppKit();
+        
+        // Clear connection flag after a timeout to prevent blocking future connection attempts
+        setTimeout(() => {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem('walletConnectionInProgress');
+            window.sessionStorage.removeItem('walletConnectionTimestamp');
+          }
+        }, 30000); // 30 seconds timeout for connection attempt
+        
         return;
       } catch (error) {
         console.error("Error opening wallet:", error);
         notification.error("Could not open wallet connection");
+        // Clear connection flag on error
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+        }
         return;
       }
+    }
+    
+    // Check if a connection or transaction is already in progress
+    if (isLoading) {
+      notification.info("Please wait for the current operation to complete");
+      return;
     }
 
     // Check if wallet is on the correct chain
@@ -446,10 +565,16 @@ export default function BridgeInterface() {
         notification.error(`Failed to initiate bridge: ${(error as Error).message}`);
       }
     } catch (error) {
-      console.error("Bridge failed:", error);
-      notification.error(`Transaction failed: ${(error as Error).message}`);
+      console.error("Bridge transaction failed:", error);
+      notification.error(`Bridge failed: ${(error as Error).message}`);
     } finally {
       setIsLoading(false);
+      
+      // Clear any connection flags
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('walletConnectionInProgress');
+        window.sessionStorage.removeItem('walletConnectionTimestamp');
+      }
     }
   };
 

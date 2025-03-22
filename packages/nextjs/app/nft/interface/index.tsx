@@ -2,10 +2,113 @@
 
 import React, { useEffect, useState } from 'react';
 import { isAddress, createPublicClient, http, Address } from 'viem';
+import * as viemChains from 'viem/chains';
 import { useTargetNetwork } from '../../../hooks/scaffold-eth/useTargetNetwork';
 import { useContractStore } from "../../../utils/scaffold-eth/contract";
 import { notification } from "../../../utils/scaffold-eth/notification";
-import { useQRTransactionFlow } from "../../../hooks/scaffold-eth/useQRTransactionFlow";
+import { 
+  useAppKit, 
+  useAppKitAccount, 
+  useAppKitProvider, 
+  useAppKitNetwork,
+  useDisconnect,
+  createAppKit
+} from '@reown/appkit/react';
+import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import { BrowserProvider } from 'ethers';
+import { mainnet, sepolia, arbitrum } from '@reown/appkit/networks';
+import type { AppKitNetwork } from '@reown/appkit/networks';
+
+// Initialize AppKit at module level
+if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
+  try {
+    console.log('Initializing AppKit in NFT interface...');
+    // Project metadata
+    const metadata = {
+      name: 'PureContracts NFT',
+      description: 'Interact with NFT tokens',
+      url: 'https://reown.net',
+      icons: ['https://reown.net/images/logo.png'],
+    };
+    
+    // WalletConnect project ID (get from environment or use placeholder)
+    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
+    
+    // Create ethers adapter
+    const ethersAdapter = new EthersAdapter();
+    
+    // Generate AppKit networks from all available viem chains
+    const viemChainsArray = Object.values(viemChains).filter(
+      (chain): chain is typeof viemChains.mainnet => 
+        typeof chain === 'object' && 
+        chain !== null && 
+        'id' in chain && 
+        typeof chain.id === 'number'
+    );
+    
+    // Convert viem chains to AppKit networks
+    const appKitNetworks: AppKitNetwork[] = viemChainsArray.map(chain => ({
+      id: chain.id,
+      name: chain.name || `Chain ${chain.id}`,
+      rpcUrls: {
+        default: {
+          http: chain.rpcUrls?.default?.http || [`https://rpc.ankr.com/${chain.id}`]
+        }
+      },
+      nativeCurrency: {
+        name: chain.nativeCurrency?.name || 'Ether',
+        symbol: chain.nativeCurrency?.symbol || 'ETH',
+        decimals: chain.nativeCurrency?.decimals || 18,
+      },
+      blockExplorers: chain.blockExplorers?.default 
+        ? {
+            default: {
+              url: chain.blockExplorers.default.url,
+              name: chain.blockExplorers.default.name || 'Explorer'
+            }
+          }
+        : {
+            default: {
+              url: `https://etherscan.io`,
+              name: 'Explorer'
+            }
+          }
+    }));
+    
+    // Ensure we have at least mainnet as the first item
+    const mainnetNetwork = appKitNetworks.find(n => n.id === 1);
+    if (mainnetNetwork) {
+      // Move mainnet to the beginning of the array
+      const filteredNetworks = appKitNetworks.filter(n => n.id !== 1);
+      const networks = [mainnetNetwork, ...filteredNetworks] as [AppKitNetwork, ...AppKitNetwork[]];
+      
+      console.log(`Initializing AppKit with ${networks.length} networks`);
+      console.log('Networks included:', networks.map(n => `${n.name} (${n.id})`).slice(0, 5), '...');
+      
+      createAppKit({
+        adapters: [ethersAdapter],
+        networks,
+        metadata,
+        projectId,
+        themeMode: 'dark',
+        features: {
+          analytics: true,
+        },
+        themeVariables: {
+          // Theme customization if needed
+        },
+      });
+    } else {
+      throw new Error("Mainnet network not found in viem chains");
+    }
+    
+    // Mark as initialized
+    (window as any).__APPKIT_INITIALIZED__ = true;
+    console.log('AppKit initialized in NFT interface');
+  } catch (error) {
+    console.error('Error initializing AppKit:', error);
+  }
+}
 
 export default function NFTInterface() {
   const [collectionName, setCollectionName] = useState<string>("");
@@ -18,41 +121,17 @@ export default function NFTInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
 
-  // Default to the first account for reading purposes
-  const [userAddress, setUserAddress] = useState<string | null>(null);
+  // Get user address from AppKit
   const { targetNetwork } = useTargetNetwork();
+  const { isConnected, address: userAddress } = useAppKitAccount();
+  const { open: openAppKit } = useAppKit();
+  const { walletProvider } = useAppKitProvider<any>('eip155');
+  const { chainId: currentChainId, switchNetwork } = useAppKitNetwork();
+  const { disconnect } = useDisconnect();
   
   // Get contract data from the store
   const contracts = useContractStore(state => state.contracts);
   const contractData = contracts?.[targetNetwork.id]?.YourContract;
-
-  // Add QR transaction flow
-  const { 
-    initiateQRTransaction, 
-    QRTransactionModalComponent, 
-    isExecuting, 
-    cancelTransaction 
-  } = useQRTransactionFlow({
-    chainId: targetNetwork.id,
-  });
-
-  // Get user address if wallet is connected
-  useEffect(() => {
-    const checkConnection = async () => {
-      if (typeof window !== 'undefined' && window.ethereum) {
-        try {
-          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-          if (accounts && accounts.length > 0) {
-            setUserAddress(accounts[0]);
-          }
-        } catch (error) {
-          console.error("Error checking connection:", error);
-        }
-      }
-    };
-    
-    checkConnection();
-  }, []);
 
   useEffect(() => {
     const readCollectionInfo = async () => {
@@ -92,49 +171,108 @@ export default function NFTInterface() {
           console.error("Error reading collection symbol:", error);
         }
 
-        // Try to fetch tokens owned by user if address exists
+        // Fetch user's tokens if address is available
         if (userAddress) {
           try {
-            // Some contracts have balanceOf(address) that returns the number of tokens
-            const balance = await client.readContract({
-              address: contractData.address,
-              abi: contractData.abi,
-              functionName: 'balanceOf',
-              args: [userAddress as Address],
-            });
-            
-            console.log("Balance:", balance);
-            
-            // Try to find tokens owned by this user
-            // This is basic and not all contracts will have a tokenOfOwnerByIndex method
-            const tokens = [];
+            // This will be different based on contract implementation
+            // This assumes the contract has a function to get token IDs by owner
+            // Replace with appropriate method for the specific NFT contract
             try {
-              // For enumerable collections
-              for (let i = 0; i < Number(balance); i++) {
-                const tokenId = await client.readContract({
+              const balance = await client.readContract({
+                address: contractData.address,
+                abi: contractData.abi,
+                functionName: 'balanceOf',
+                args: [userAddress as Address]
+              });
+              
+              console.log("User NFT balance:", balance);
+              
+              // For contracts that have a tokensOfOwner function
+              try {
+                const tokens = await client.readContract({
                   address: contractData.address,
                   abi: contractData.abi,
-                  functionName: 'tokenOfOwnerByIndex',
-                  args: [userAddress as Address, BigInt(i)],
+                  functionName: 'tokensOfOwner', 
+                  args: [userAddress as Address]
                 });
-                tokens.push(String(tokenId));
+                
+                setUserTokens(Array.isArray(tokens) ? 
+                  tokens.map(t => (typeof t === 'bigint' ? t.toString() : String(t))) : 
+                  []);
+                  
+                console.log("User tokens:", tokens);
+              } catch (tokenError) {
+                console.info("Contract doesn't have tokensOfOwner function:", tokenError);
               }
-              setUserTokens(tokens);
             } catch (error) {
-              console.error("Contract might not support tokenOfOwnerByIndex:", error);
+              console.error("Error getting user token balance:", error);
             }
           } catch (error) {
-            console.error("Error reading token balance:", error);
+            console.error("Error getting user tokens:", error);
           }
         }
       } catch (error) {
         console.error("Error reading collection info:", error);
-        notification.error("Failed to load NFT collection data");
       }
     };
 
     readCollectionInfo();
-  }, [contractData, targetNetwork, userAddress]);
+  }, [contractData, userAddress, targetNetwork]);
+
+  // Check for pending transactions when wallet connects
+  useEffect(() => {
+    const checkPendingTransactions = async () => {
+      if (isConnected && userAddress && typeof window !== 'undefined') {
+        const pendingTransfer = window.sessionStorage.getItem('pendingNFTTransfer');
+        
+        if (pendingTransfer) {
+          try {
+            const txData = JSON.parse(pendingTransfer);
+            
+            // Apply the stored transaction data
+            if (txData.recipientAddress) setRecipientAddress(txData.recipientAddress);
+            if (txData.tokenId) setTokenId(txData.tokenId);
+            
+            // Clear the stored transaction
+            window.sessionStorage.removeItem('pendingNFTTransfer');
+            
+            notification.info("Transfer details restored. You can now proceed with your transaction.");
+          } catch (error) {
+            console.error("Error parsing pending transfer:", error);
+            window.sessionStorage.removeItem('pendingNFTTransfer');
+          }
+        }
+      }
+    };
+    
+    checkPendingTransactions();
+  }, [isConnected, userAddress]);
+
+  // Clear any stale connection flags on component mount and when connection status changes
+  useEffect(() => {
+    // Check for stale connection flags
+    if (typeof window !== 'undefined') {
+      const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
+      const connectionTimestamp = window.sessionStorage.getItem('walletConnectionTimestamp');
+      
+      // If connection was initiated more than 2 minutes ago or user is now connected, clear the flag
+      if (connectionInProgress) {
+        const now = Date.now();
+        const timestamp = connectionTimestamp ? parseInt(connectionTimestamp, 10) : 0;
+        
+        if (isConnected || now - timestamp > 120000 || !connectionTimestamp) {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+        }
+      }
+    }
+    
+    // If user is connected, ensure connection flags are cleared
+    if (isConnected && typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('walletConnectionInProgress');
+      window.sessionStorage.removeItem('walletConnectionTimestamp');
+    }
+  }, [isConnected]);
 
   const fetchTokenMetadata = async () => {
     if (!tokenId || !contractData?.address) return;
@@ -193,12 +331,152 @@ export default function NFTInterface() {
   const handleTransfer = async () => {
     if (!isAddress(recipientAddress) || !tokenId || !contractData) return;
     
-    // Don't set loading if the transaction is already executing through AppKit
-    if (!isExecuting) {
-      setIsLoading(true);
+    // Check if wallet is connected, if not prompt to connect
+    if (!isConnected || !userAddress) {
+      notification.info("Please connect your wallet first");
+      try {
+        // Store pending transaction parameters
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('pendingNFTTransfer', JSON.stringify({
+            recipientAddress,
+            tokenId
+          }));
+          console.log("Stored pending NFT transfer transaction");
+        }
+        
+        // Set a flag to indicate connection is in progress
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('walletConnectionInProgress', 'true');
+          window.sessionStorage.setItem('walletConnectionTimestamp', Date.now().toString());
+        }
+        
+        // Open AppKit to connect wallet
+        openAppKit();
+        
+        // Clear connection flag after a timeout to prevent blocking future connection attempts
+        setTimeout(() => {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem('walletConnectionInProgress');
+            window.sessionStorage.removeItem('walletConnectionTimestamp');
+          }
+        }, 30000); // 30 seconds timeout for connection attempt
+        
+        return;
+      } catch (error) {
+        console.error("Error opening wallet:", error);
+        notification.error("Could not open wallet connection");
+        // Clear connection flag on error
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+        }
+        return;
+      }
     }
     
+    // Check if a connection or transaction is already in progress
+    if (isLoading) {
+      notification.info("Please wait for the current operation to complete");
+      return;
+    }
+    
+    setIsLoading(true);
+    
     try {
+      // Check if we need to switch networks
+      if (currentChainId !== targetNetwork.id) {
+        notification.info(`Switching to ${targetNetwork.name} network...`);
+        try {
+          // Direct wallet provider call to switch chains
+          if (walletProvider && walletProvider.request) {
+            try {
+              // First try to switch to the chain
+              await walletProvider.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
+              });
+              notification.success(`Switched to ${targetNetwork.name}!`);
+            } catch (switchError: any) {
+              // If the chain hasn't been added to the wallet yet, try to add it
+              if (switchError.code === 4902 || 
+                  switchError.message?.includes('wallet_addEthereumChain') ||
+                  switchError.message?.includes('Unrecognized chain ID')) {
+                try {
+                  // Find the chain details from viem
+                  const viemChain = Object.values(viemChains).find(
+                    (chain) => typeof chain === 'object' && 
+                              chain !== null && 
+                              'id' in chain && 
+                              chain.id === targetNetwork.id
+                  );
+                  
+                  if (!viemChain || typeof viemChain !== 'object') {
+                    throw new Error(`Chain with ID ${targetNetwork.id} not found in viem chains`);
+                  }
+                  
+                  // Add the chain to the wallet
+                  await walletProvider.request({
+                    method: 'wallet_addEthereumChain',
+                    params: [{
+                      chainId: `0x${targetNetwork.id.toString(16)}`,
+                      chainName: targetNetwork.name,
+                      nativeCurrency: {
+                        name: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                          viemChain.nativeCurrency.name : 'Ether',
+                        symbol: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                          viemChain.nativeCurrency.symbol : 'ETH',
+                        decimals: 'nativeCurrency' in viemChain && viemChain.nativeCurrency ? 
+                          viemChain.nativeCurrency.decimals : 18
+                      },
+                      rpcUrls: 'rpcUrls' in viemChain && 
+                               viemChain.rpcUrls && 
+                               'default' in viemChain.rpcUrls && 
+                               'http' in viemChain.rpcUrls.default ? 
+                                 viemChain.rpcUrls.default.http : 
+                                 [`https://rpc.ankr.com/${targetNetwork.id}`],
+                      blockExplorerUrls: 'blockExplorers' in viemChain && 
+                                         viemChain.blockExplorers && 
+                                         'default' in viemChain.blockExplorers ? 
+                                           [viemChain.blockExplorers.default.url] : 
+                                           ['https://etherscan.io']
+                    }]
+                  });
+                  
+                  notification.success(`Added and switched to ${targetNetwork.name}`);
+                } catch (addError) {
+                  console.error("Error adding chain to wallet:", addError);
+                  notification.error(`Could not add ${targetNetwork.name} to your wallet`);
+                  setIsLoading(false);
+                  return;
+                }
+              } else {
+                console.error("Error switching chain:", switchError);
+                notification.error(`Could not switch to ${targetNetwork.name}`);
+                setIsLoading(false);
+                return;
+              }
+            }
+          } else {
+            throw new Error("Wallet provider not available or doesn't support network switching");
+          }
+        } catch (switchError) {
+          console.error("Failed to switch network:", switchError);
+          notification.error(`Failed to switch network: ${(switchError as Error).message}`);
+          setIsLoading(false);
+          return;
+        }
+      }
+      
+      // Create ethers provider and signer
+      if (!walletProvider) {
+        notification.error("Wallet provider not available");
+        setIsLoading(false);
+        return;
+      }
+      
+      const provider = new BrowserProvider(walletProvider);
+      const signer = await provider.getSigner();
+      
       // For ERC721 safeTransferFrom: function safeTransferFrom(address from, address to, uint256 tokenId)
       // Function signature: 0x42842e0e
       const transferData = '0x42842e0e' + 
@@ -211,44 +489,35 @@ export default function NFTInterface() {
       console.log("Recipient:", recipientAddress);
       
       try {
-        notification.info(`Initiating transfer of ${collectionSymbol} #${tokenId} to ${recipientAddress.substring(0, 6)}...${recipientAddress.substring(38)} on ${targetNetwork.name}...`);
+        notification.info(`Transferring ${collectionSymbol} #${tokenId} to ${recipientAddress.substring(0, 6)}...${recipientAddress.substring(38)}...`);
         
-        await initiateQRTransaction(
-          contractData.address as Address,
-          transferData,
-          BigInt(0) // No ETH value is sent for NFT transfers
-        );
+        const tx = await signer.sendTransaction({
+          to: contractData.address as string,
+          data: transferData,
+        });
         
-        // Reset form fields after transaction is initiated
+        notification.success(`Transaction sent: ${tx.hash}`);
+        console.log("Transfer transaction:", tx.hash);
+        
+        // Reset form fields after transaction is sent
         setTokenId('');
         setRecipientAddress('');
-      } catch (error) {
-        console.error("Failed to initiate transfer transaction:", error);
-        notification.error(`Failed to initiate transfer: ${(error as Error).message}`);
+      } catch (txError) {
+        console.error("Failed to transfer NFT:", txError);
+        notification.error(`Transaction failed: ${(txError as Error).message}`);
       }
     } catch (error) {
       console.error("Transfer failed:", error);
       notification.error(`Transaction failed: ${(error as Error).message}`);
     } finally {
-      // Only reset loading if AppKit is not executing
-      if (!isExecuting) {
-        setIsLoading(false);
+      setIsLoading(false);
+      
+      // Clear any connection flags
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('walletConnectionInProgress');
+        window.sessionStorage.removeItem('walletConnectionTimestamp');
       }
     }
-  };
-
-  // Helper function to display token image
-  const getTokenImage = () => {
-    if (!tokenMetadata) return null;
-    
-    let imageUrl = tokenMetadata.image || tokenMetadata.image_url;
-    
-    // Handle IPFS URLs
-    if (imageUrl && imageUrl.startsWith('ipfs://')) {
-      imageUrl = imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/');
-    }
-    
-    return imageUrl;
   };
 
   return (
@@ -259,24 +528,17 @@ export default function NFTInterface() {
         </h2>
         <p className="text-md text-gray-300 mt-2">
           {userAddress ? (
-            <>
-              Your NFTs: <span className="font-bold">{userTokens.length}</span>
-              {userTokens.length > 0 && (
-                <span className="ml-2 text-sm">
-                  (IDs: {userTokens.slice(0, 5).join(', ')}{userTokens.length > 5 ? '...' : ''})
-                </span>
-              )}
-            </>
+            <>Your NFTs: <span className="font-bold">{userTokens.length > 0 ? userTokens.join(', ') : 'None'}</span></>
           ) : (
             <span className="italic">Connect your wallet to view your NFTs</span>
           )}
         </p>
       </div>
 
-      {/* Metadata Lookup Section */}
+      {/* Token Lookup */}
       <div className="mb-6 p-4 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
         <h3 className="text-lg font-semibold mb-3 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
-          Lookup NFT Metadata
+          NFT Lookup
         </h3>
         <div className="flex gap-2">
           <input
@@ -289,62 +551,57 @@ export default function NFTInterface() {
           <button
             onClick={fetchTokenMetadata}
             disabled={!tokenId || isFetchingMetadata}
-            className={`px-4 py-2 rounded-lg shadow-md transition-all duration-200 relative
-              ${(!tokenId || isFetchingMetadata)
+            className={`px-4 py-2 rounded-lg transition-colors
+              ${!tokenId || isFetchingMetadata
                 ? 'bg-gray-700 cursor-not-allowed text-gray-400'
-                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
-              } font-medium text-sm`}
+                : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
           >
-            <span className={`${isFetchingMetadata ? 'opacity-0' : 'opacity-100'}`}>
-              View
-            </span>
-            
-            {isFetchingMetadata && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-              </div>
-            )}
+            {isFetchingMetadata ? 'Loading...' : 'Lookup'}
           </button>
         </div>
         
-        {/* Display Metadata */}
+        {/* Token Metadata Display */}
         {tokenMetadata && (
-          <div className="mt-4 rounded-lg bg-gray-900/50 p-4 border border-gray-700">
-            <div className="flex flex-col md:flex-row gap-4">
-              {getTokenImage() && (
-                <div className="md:w-1/3">
-                  <img 
-                    src={getTokenImage()} 
-                    alt={tokenMetadata.name || `Token #${tokenId}`} 
-                    className="rounded-lg w-full object-cover"
-                  />
-                </div>
-              )}
-              <div className={`${getTokenImage() ? 'md:w-2/3' : 'w-full'}`}>
-                <h4 className="text-lg font-semibold text-white mb-2">
-                  {tokenMetadata.name || `Token #${tokenId}`}
-                </h4>
-                {tokenMetadata.description && (
-                  <p className="text-sm text-gray-300 mb-3">{tokenMetadata.description}</p>
-                )}
-                {tokenMetadata.attributes && tokenMetadata.attributes.length > 0 && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-300 mb-2">Attributes:</h5>
-                    <div className="grid grid-cols-2 gap-2">
-                      {tokenMetadata.attributes.map((attr: any, index: number) => (
-                        <div key={index} className="text-xs bg-gray-800 p-2 rounded border border-gray-700">
-                          <span className="text-gray-400">{attr.trait_type || 'Trait'}:</span>
-                          <span className="ml-1 text-blue-400 font-medium">{attr.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+          <div className="mt-4 p-3 rounded-lg bg-gray-700/50 border border-gray-600">
+            <h4 className="font-medium text-blue-300 mb-2">
+              {tokenMetadata.name || `Token #${tokenId}`}
+            </h4>
+            
+            {tokenMetadata.image && (
+              <div className="mb-3 overflow-hidden rounded-lg">
+                <img 
+                  src={tokenMetadata.image.startsWith('ipfs://') 
+                    ? tokenMetadata.image.replace('ipfs://', 'https://ipfs.io/ipfs/') 
+                    : tokenMetadata.image}
+                  alt={tokenMetadata.name || `Token #${tokenId}`}
+                  className="w-full h-auto object-cover"
+                />
               </div>
+            )}
+            
+            {tokenMetadata.description && (
+              <p className="text-sm text-gray-300 mb-2">{tokenMetadata.description}</p>
+            )}
+            
+            {tokenMetadata.attributes && (
+              <div className="mt-2">
+                <p className="text-xs text-gray-400 mb-1">Attributes:</p>
+                <div className="grid grid-cols-2 gap-1">
+                  {tokenMetadata.attributes.map((attr: any, index: number) => (
+                    <div key={index} className="text-xs bg-gray-800/70 rounded p-1">
+                      <span className="text-gray-400">{attr.trait_type}: </span>
+                      <span className="text-blue-300">{attr.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="mt-3 pt-2 border-t border-gray-600">
+              <p className="text-xs text-gray-400">
+                Token URI: <a href={tokenURI} target="_blank" rel="noopener noreferrer" className="text-blue-400 break-all">{tokenURI}</a>
+              </p>
             </div>
           </div>
         )}
@@ -374,18 +631,18 @@ export default function NFTInterface() {
         />
         <button
           onClick={handleTransfer}
-          disabled={!isAddress(recipientAddress) || !tokenId || isLoading || isExecuting}
+          disabled={!isAddress(recipientAddress) || !tokenId || isLoading}
           className={`w-full py-2 px-4 mt-2 rounded-lg shadow-md transition-all duration-200 relative
-            ${(!isAddress(recipientAddress) || !tokenId || isLoading || isExecuting)
+            ${(!isAddress(recipientAddress) || !tokenId || isLoading)
               ? 'bg-gray-700 cursor-not-allowed text-gray-400'
               : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
             } font-medium text-sm`}
         >
-          <span className={`${isLoading || isExecuting ? 'opacity-0' : 'opacity-100'}`}>
+          <span className={`${isLoading ? 'opacity-0' : 'opacity-100'}`}>
             Transfer NFT
           </span>
           
-          {(isLoading || isExecuting) && (
+          {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex gap-1">
                 <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
@@ -397,15 +654,14 @@ export default function NFTInterface() {
         </button>
       </div>
       
-      {/* Cancel transaction option during loading/executing */}
-      {(isLoading || isExecuting) && (
+      {/* Cancel transaction option during loading */}
+      {isLoading && (
         <div className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
           <p className="text-center mb-2">
             Transaction in progress. Please check your wallet for confirmation requests.
           </p>
           <button
             onClick={() => {
-              cancelTransaction();
               setIsLoading(false);
               setTokenId('');
               setRecipientAddress('');
@@ -416,9 +672,6 @@ export default function NFTInterface() {
           </button>
         </div>
       )}
-
-      {/* Render QR Transaction Modal */}
-      <QRTransactionModalComponent />
     </div>
   );
 } 
