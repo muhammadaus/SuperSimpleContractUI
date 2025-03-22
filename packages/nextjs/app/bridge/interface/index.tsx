@@ -329,19 +329,13 @@ export default function BridgeInterface() {
         // For depositV3 function
         const functionSignature = '0x7b939232'; // depositV3 function signature
         
-        // Get current timestamp for quoteTimestamp
-        const currentTimestamp = Math.floor(Date.now() / 1000);
-        
-        // Calculate fillDeadline (24 hours from now)
-        const fillDeadline = currentTimestamp + (24 * 60 * 60);
-        
         // Make sure userAddress exists before using it
         if (!userAddress) {
           notification.error("Wallet not connected");
           setIsLoading(false);
           return;
         }
-
+        
         // Helper function to properly pad and format addresses and numbers for ABI encoding
         const padAddress = (address: string) => {
           return address.toLowerCase().startsWith('0x') 
@@ -362,9 +356,44 @@ export default function BridgeInterface() {
           ? inputTokenAddress
           : '0x0000000000000000000000000000000000000000';
         
-        // Output token on Base (WETH)
-        // The correct format based on successful transaction is:
-        const outputTokenAddr = '0000000000000000000000000000000000000000000000000000000000000000';
+        // Fix output token - CRITICAL: Use EXACT FORMAT from working sample
+        // Working: 0000000000000000000000004200000000000000000000000000000000000006
+        const outputTokenAddr = '0000000000000000000000004200000000000000000000000000000000000006';
+        
+        // CRITICAL: Looking at the successful bytecode timestamps closely
+        // Working from hex: 0x67ddebe0 (quoteTimestamp) -> 0x67de1af4 (fillDeadline)
+        // The difference is EXACTLY 86400 seconds (24 hours)
+        
+        // Use the EXACT values from the working example but with a fixed offset
+        // to ensure they're in the future
+        const nowTimestamp = Math.floor(Date.now() / 1000);
+        
+        // Difference between now and the working timestamp
+        const timeOffset = nowTimestamp - 0x67ddebe0; // Difference from working example to now
+        
+        // Set quoteTimestamp and fillDeadline with the same relative difference as in the working example
+        const quoteTimestamp = 0x67ddebe0 + timeOffset; // Working timestamp adjusted to current time
+        const fillDeadline = 0x67de1af4 + timeOffset;   // Working fillDeadline adjusted to current time
+        
+        // Double check the difference is exactly 86400 seconds (24 hours)
+        const difference = fillDeadline - quoteTimestamp;
+        console.log(`Difference between timestamps: ${difference} (should be 86400)`);
+        
+        // Log all values for debugging
+        console.log("Using timestamps:", {
+          nowTimestamp,
+          timeOffset,
+          working: {
+            quoteTimestamp: "0x67ddebe0",
+            fillDeadline: "0x67de1af4",
+            diff: 0x67de1af4 - 0x67ddebe0
+          },
+          adjusted: {
+            quoteTimestamp: `0x${quoteTimestamp.toString(16)}`,
+            fillDeadline: `0x${fillDeadline.toString(16)}`,
+            diff: fillDeadline - quoteTimestamp
+          }
+        });
         
         // Message bytes - following the format from the successful transaction
         // The message parameter needs a specific format with offset and length
@@ -372,19 +401,19 @@ export default function BridgeInterface() {
         const messageLength = '0000000000000000000000000000000000000000000000000000000000000001'; // Length of message data (1 byte)
         const messageData = 'dc0de0000000000000000000000000000000000000000000000000000000000000'; // Message data with padding
         
-        // Prepare the data for depositV3
+        // IMPORTANT: Create exact bytecode matching the working transaction format
         const bridgeData = 
           functionSignature +
           padAddress(userAddress) + // depositor
           padAddress(recipientAddress) + // recipient
           padAddress(inputTokenAddr) + // inputToken
-          outputTokenAddr + // outputToken (WETH on Base)
+          outputTokenAddr + // outputToken (WETH on Base) - use exact format that worked
           padUint256(parsedAmount) + // inputAmount
           padUint256(parsedAmount) + // outputAmount (same as input for now)
           padUint256(BigInt(targetChainId)) + // destinationChainId
           padAddress('0x0000000000000000000000000000000000000000') + // exclusiveRelayer
-          padUint32(currentTimestamp) + // quoteTimestamp
-          padUint32(fillDeadline) + // fillDeadline
+          padUint32(quoteTimestamp) + // Adjusted timestamp based on working example
+          padUint32(fillDeadline) + // Adjusted fillDeadline based on working example
           padUint32(0) + // exclusivityParameter
           messageOffset; // Offset to message data in bytes
           
@@ -393,8 +422,8 @@ export default function BridgeInterface() {
         
         console.log("Generated bridge data:", fullBridgeData);
         
-        // Generate gas params for better control over gas
-        const gasLimit = BigInt(500000); // Higher gas limit for complex contracts
+        // Generate gas params for better control over gas - critical for complex contract calls
+        const gasLimit = BigInt(2000000); // Use 2M gas limit as in successful transaction
         
         notification.info(`Initiating bridge of ${amount} ETH to ${recipientAddress.substring(0, 6)}...${recipientAddress.substring(38)} on chain ID ${targetChainId}...`);
         
@@ -407,10 +436,10 @@ export default function BridgeInterface() {
         );
         
         if (success) {
-          // Reset fields after transaction is initiated
-          setAmount('');
-          setRecipientAddress('');
-          setInputTokenAddress('');
+          // Don't reset fields after transaction is initiated so user can click again
+          notification.success("Bridge transaction initiated. Fields kept for convenience.");
+          // Only reset loading state
+          setIsLoading(false);
         }
       } catch (error) {
         console.error("Failed to initiate bridge transaction:", error);
