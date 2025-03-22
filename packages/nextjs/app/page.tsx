@@ -183,12 +183,16 @@ const Home: NextPage = () => {
   const isBridgeContract = (abi: any[]) => {
     // Check for common bridge functions and events
     const bridgeIndicators = [
+      'depositV3',
+      'deposit',
       'relayMessage',
       'relayTokens',
       'l2GasPrice',
       'l1Inbox',
       'MessageRelayed',
-      'TokensRelayed'
+      'TokensRelayed',
+      'FundsDeposited',
+      'FilledRelay'
     ];
     
     const abiElements = abi.map(item => 
@@ -200,8 +204,8 @@ const Home: NextPage = () => {
       abiElements.includes(indicator)
     ).length;
 
-    // Consider it a bridge if it matches 3 or more indicators
-    return matchCount >= 3;
+    // Consider it a bridge if it matches 2 or more indicators
+    return matchCount >= 2;
   };
 
   // Add this function to detect wrappable tokens
