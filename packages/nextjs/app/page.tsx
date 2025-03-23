@@ -24,6 +24,7 @@ const ERC20Interface = dynamic(() => import('./erc20/interface'), { ssr: false }
 const NFTInterface = dynamic(() => import('./nft/interface'), { ssr: false });
 const WrapInterface = dynamic(() => import('./wrap/interface'), { ssr: false });
 const BridgeInterface = dynamic(() => import('./bridge/interface'), { ssr: false });
+const LiquidityInterface = dynamic(() => import('./liquidity/interface'), { ssr: false });
 const ReadWriteInterface = dynamic(() => import('./readwrite/_components/ReadWrite'), { ssr: false });
 
 // Define the chain names type from viem/chains
@@ -236,6 +237,140 @@ const Home: NextPage = () => {
     return isWETH || isWstETH;
   };
 
+  // Add this function to detect liquidity pool contracts
+  const isLiquidityPoolContract = (abi: any[]): boolean => {
+    // Check for key Uniswap V4 functions that indicate a liquidity pool manager
+    
+    // Check for initialize function with PoolKey tuple
+    const hasInitialize = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'initialize' &&
+        item.inputs?.length >= 1 &&
+        item.inputs.some((input: any) => 
+          input.type === 'tuple' && 
+          input.components?.some((comp: any) => 
+            comp.name === 'currency0' || 
+            comp.name === 'currency1' ||
+            comp.name === 'fee' ||
+            comp.name === 'tickSpacing'
+          )
+        )
+    );
+    
+    // Check for modifyLiquidity function
+    const hasModifyLiquidity = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'modifyLiquidity'
+    );
+    
+    // Check for swap function
+    const hasSwap = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'swap'
+    );
+    
+    // Check for key events
+    const hasPoolEvents = abi.some(
+      (item: any) =>
+        item.type === 'event' &&
+        (item.name === 'Initialize' ||
+         item.name === 'ModifyLiquidity' ||
+         item.name === 'Swap')
+    );
+    
+    // Require at least initialize, modifyLiquidity and either swap or events
+    return hasInitialize && hasModifyLiquidity && (hasSwap || hasPoolEvents);
+  };
+
+  // Add this function to detect Uniswap V4 Position Manager contract
+  const isPositionManagerContract = (abi: any[]): boolean => {
+    // Check for key functions that indicate a position manager
+    const hasMulticall = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'multicall'
+    );
+    
+    // Check for mint or settleAndMint function, which is a key indicator of a Position Manager
+    const hasMint = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'mint' &&
+        item.inputs?.some((input: any) => 
+          input.type === 'tuple' && 
+          input.components?.some((comp: any) => 
+            comp.name === 'currency0' || 
+            comp.name === 'currency1'
+          )
+        )
+    );
+    
+    const hasSettleAndMint = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'settleAndMint'
+    );
+    
+    // Check for any other position manager indicators
+    const hasSettle = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'settle'
+    );
+    
+    const hasModifyLiquidities = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'modifyLiquidities'
+    );
+    
+    const hasAddLiquidity = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'addLiquidity'
+    );
+    
+    const hasRemoveLiquidity = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'removeLiquidity'
+    );
+    
+    // Contract name check (if available)
+    const contractNameMatch = abi.some(
+      (item: any) =>
+        item.name === 'PositionManager' ||
+        (typeof item.name === 'string' && item.name.includes('PositionManager'))
+    );
+    
+    console.log("Position Manager detection:", {
+      hasMulticall,
+      hasMint,
+      hasSettleAndMint,
+      hasSettle,
+      hasModifyLiquidities,
+      hasAddLiquidity,
+      hasRemoveLiquidity,
+      contractNameMatch
+    });
+    
+    // Require multicall and at least one of the other functions
+    const isLikelyPositionManager = hasMulticall && (
+      hasMint || 
+      hasSettleAndMint || 
+      hasSettle || 
+      hasModifyLiquidities || 
+      hasAddLiquidity || 
+      hasRemoveLiquidity ||
+      contractNameMatch
+    );
+    
+    return isLikelyPositionManager;
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
@@ -269,6 +404,8 @@ const Home: NextPage = () => {
       const isWrappable = isWrappableToken(parsedAbi);
       const isERC20 = isERC20Contract(parsedAbi);
       const isERC721 = isERC721Contract(parsedAbi);
+      const isLiquidityPool = isLiquidityPoolContract(parsedAbi);
+      const isPositionManager = isPositionManagerContract(parsedAbi);
 
       // Get the network ID from the selected network
       const selectedChain = (viemChains as any)[selectedNetwork.value];
@@ -280,19 +417,60 @@ const Home: NextPage = () => {
       // Set the target network
       setTargetNetwork(selectedChain);
       
-      // Create the contract update
-      const contractUpdate: GenericContractsDeclaration = {
-        [networkId]: {
-          "YourContract": {
-            address: formattedAddress,
-            abi: parsedAbi,
-            inheritedFunctions: {}
-          }
-        }
-      };
-
-      // Set the contracts in the store
-      await setContracts(contractUpdate);
+      // Get current contracts state
+      const currentContracts = useContractStore.getState().contracts;
+      
+      // Merge with existing contracts instead of replacing them
+      const mergedContracts: GenericContractsDeclaration = {};
+      
+      // Add all networks from current contracts 
+      Object.keys(currentContracts).forEach(chainIdStr => {
+        const chainId = Number(chainIdStr);
+        mergedContracts[chainId] = { ...currentContracts[chainId] };
+      });
+      
+      // Add or update the new contract
+      if (!mergedContracts[networkId]) {
+        mergedContracts[networkId] = {};
+      }
+      
+      // Create a fresh object for the network contracts to avoid reference issues
+      mergedContracts[networkId] = { ...mergedContracts[networkId] };
+      
+      // Update with the new contract
+      if (isLiquidityPool) {
+        mergedContracts[networkId]["LiquidityPoolManager"] = {
+          address: formattedAddress,
+          abi: parsedAbi,
+          inheritedFunctions: {}
+        };
+      } else if (isPositionManager) {
+        mergedContracts[networkId]["PositionManager"] = {
+          address: formattedAddress,
+          abi: parsedAbi,
+          inheritedFunctions: {}
+        };
+      } else {
+        mergedContracts[networkId]["YourContract"] = {
+          address: formattedAddress,
+          abi: parsedAbi,
+          inheritedFunctions: {}
+        };
+      }
+      
+      // Set the merged contracts in the store
+      await setContracts(mergedContracts);
+      
+      // Debug information
+      console.log("Contract detection results:", {
+        isLiquidityPool,
+        isPositionManager,
+        networkId,
+        contractKey: isLiquidityPool ? "LiquidityPoolManager" : isPositionManager ? "PositionManager" : "YourContract",
+        contractType: isLiquidityPool ? "LiquidityPoolManager" : isPositionManager ? "PositionManager" : "YourContract"
+      });
+      
+      console.log("Merged contracts structure:", JSON.stringify(mergedContracts, null, 2));
       
       // Wait for the state to update
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -301,8 +479,25 @@ const Home: NextPage = () => {
       const allContracts = getAllContracts();
       console.log("All contracts after setting:", allContracts);
       
+      // Check if position manager was added correctly if that's what we were trying to add
+      if (isPositionManager) {
+        console.log("Position Manager in contracts:", allContracts[networkId]?.PositionManager);
+        
+        // Force reload contract data to see if that helps
+        const refreshedContracts = useContractStore.getState().contracts;
+        console.log("Refreshed contracts:", refreshedContracts);
+        console.log("Position Manager in refreshed contracts:", refreshedContracts[networkId]?.PositionManager);
+      }
+      
       // Check if the contract exists for the selected network
-      if (!allContracts[networkId] || !allContracts[networkId]["YourContract"]) {
+      let contractKey = "YourContract";
+      if (isLiquidityPool) {
+        contractKey = "LiquidityPoolManager";
+      } else if (isPositionManager) {
+        contractKey = "PositionManager";
+      }
+      
+      if (!allContracts[networkId] || !allContracts[networkId][contractKey]) {
         console.error("Contract not found for network ID:", networkId);
         console.error("Available contracts:", allContracts);
         throw new Error("Contract not set properly for the selected network");
@@ -313,7 +508,15 @@ const Home: NextPage = () => {
       setShowTutorial(false);
 
       // Set the appropriate interface based on contract type
-      if (isWrappable) {
+      if (isLiquidityPool || isPositionManager) {
+        // Use liquidity interface for both pool manager and position manager
+        setContractInterface('liquidity');
+        if (isLiquidityPool) {
+          notification.success("Liquidity pool contract detected!");
+        } else {
+          notification.success("Position manager contract detected!");
+        }
+      } else if (isWrappable) {
         setContractInterface('wrap');
         notification.success("Wrapped token contract detected!");
       } else if (isBridge) {
@@ -596,6 +799,7 @@ const Home: NextPage = () => {
                 {contractInterface === 'nft' && <NFTInterface />}
                 {contractInterface === 'wrap' && <WrapInterface />}
                 {contractInterface === 'bridge' && <BridgeInterface />}
+                {contractInterface === 'liquidity' && <LiquidityInterface />}
                 {contractInterface === 'readwrite' && <ReadWriteInterface />}
               </Suspense>
             </div>
@@ -631,6 +835,7 @@ const Home: NextPage = () => {
                     <li><span className="font-medium">ERC-721 NFTs</span> - For non-fungible tokens</li>
                     <li><span className="font-medium">Wrapped tokens</span> - For WETH, wstETH, and similar contracts</li>
                     <li><span className="font-medium">Bridge contracts</span> - For cross-chain interactions</li>
+                    <li><span className="font-medium">Liquidity pools</span> - For liquidity pool interactions</li>
                     <li><span className="font-medium">Universal Router</span> - For complex swap workflows</li>
                     <li><span className="font-medium">General contracts</span> - Any other EVM contract</li>
                   </ul>
