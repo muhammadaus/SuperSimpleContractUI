@@ -2009,7 +2009,6 @@ export default function LiquidityPoolInterface() {
       console.log("Transaction receipt:", receipt);
       if (receipt && receipt.status === 1) {
         notification.success("Position created successfully!");
-        // Removed redirection to my-positions
       } else {
         notification.error("Transaction failed on-chain.");
       }

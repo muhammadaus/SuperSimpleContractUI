@@ -25,6 +25,7 @@ const NFTInterface = dynamic(() => import('./nft/interface'), { ssr: false });
 const WrapInterface = dynamic(() => import('./wrap/interface'), { ssr: false });
 const BridgeInterface = dynamic(() => import('./bridge/interface'), { ssr: false });
 const LiquidityInterface = dynamic(() => import('./liquidity/interface'), { ssr: false });
+const SwapInterface = dynamic(() => import('./swap/interface'), { ssr: false });
 const ReadWriteInterface = dynamic(() => import('./readwrite/_components/ReadWrite'), { ssr: false });
 
 // Define the chain names type from viem/chains
@@ -241,6 +242,27 @@ const Home: NextPage = () => {
   const isLiquidityPoolContract = (abi: any[]): boolean => {
     // Check for key Uniswap V4 functions that indicate a liquidity pool manager
     
+    // Check for pool manager singleton contract first - if it matches, don't classify it as liquidity pool
+    const isPoolManagerSingleton = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'unlock'
+    ) && abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'settle'
+    ) && abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'collectProtocolFees'
+    );
+    
+    // If this is the pool manager singleton contract, return false to prevent identifying it as a liquidity pool
+    if (isPoolManagerSingleton) {
+      console.log("Detected Uniswap V4 Pool Manager singleton contract");
+      return false;
+    }
+    
     // Check for initialize function with PoolKey tuple
     const hasInitialize = abi.some(
       (item: any) => 
@@ -371,6 +393,35 @@ const Home: NextPage = () => {
     return isLikelyPositionManager;
   };
 
+  const isUniversalRouter = (abi: any[]) => {
+    // Universal Router has execute() function with commands bytes parameter
+    const hasExecuteWithCommands = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'execute' &&
+        item.inputs?.length >= 1 &&
+        item.inputs[0]?.type === 'bytes'
+    );
+    
+    // Additional check for poolManager function
+    const hasPoolManagerFunction = abi.some(
+      (item: any) => 
+        item.type === 'function' && 
+        item.name === 'poolManager'
+    );
+    
+    // Additional check for key router error types
+    const hasRouterErrors = abi.some(
+      (item: any) => 
+        item.type === 'error' && 
+        (item.name === 'InvalidCommandType' || 
+         item.name === 'V3InvalidSwap' || 
+         item.name === 'V4TooLittleReceived')
+    );
+    
+    return hasExecuteWithCommands && (hasPoolManagerFunction || hasRouterErrors);
+  };
+
   const handleReadWrite = async () => {
     if (!address) {
       setIsAddressEmpty(true);
@@ -393,11 +444,21 @@ const Home: NextPage = () => {
     
     try {
       // Check contract type
-      const isUniversalRouter = parsedAbi.some(
+      const isRouter = isUniversalRouter(parsedAbi);
+      console.log("Universal Router detection result:", isRouter);
+      
+      const isPoolManagerSingleton = parsedAbi.some(
         (item: any) => 
           item.type === 'function' && 
-          item.name === 'execute' &&
-          item.inputs.some((input: any) => input.type === 'bytes')
+          item.name === 'unlock'
+      ) && parsedAbi.some(
+        (item: any) => 
+          item.type === 'function' && 
+          item.name === 'settle'
+      ) && parsedAbi.some(
+        (item: any) => 
+          item.type === 'function' && 
+          item.name === 'collectProtocolFees'
       );
 
       const isBridge = isBridgeContract(parsedAbi);
@@ -419,112 +480,113 @@ const Home: NextPage = () => {
       
       // Get current contracts state
       const currentContracts = useContractStore.getState().contracts;
+      console.log("Current contracts:", currentContracts);
       
-      // Merge with existing contracts instead of replacing them
+      // Create a fresh contracts object to ensure updates trigger state changes
       const mergedContracts: GenericContractsDeclaration = {};
       
       // Add all networks from current contracts 
       Object.keys(currentContracts).forEach(chainIdStr => {
         const chainId = Number(chainIdStr);
+        // Create a new object for each network to avoid reference issues
         mergedContracts[chainId] = { ...currentContracts[chainId] };
       });
       
-      // Add or update the new contract
+      // Make sure the network exists in our contracts object
       if (!mergedContracts[networkId]) {
         mergedContracts[networkId] = {};
       }
       
-      // Create a fresh object for the network contracts to avoid reference issues
-      mergedContracts[networkId] = { ...mergedContracts[networkId] };
-      
       // Update with the new contract
-      if (isLiquidityPool) {
-        mergedContracts[networkId]["LiquidityPoolManager"] = {
-          address: formattedAddress,
-          abi: parsedAbi,
-          inheritedFunctions: {}
+      if (isRouter) {
+        console.log(`Adding UniversalRouter to network ${networkId} at ${formattedAddress}`);
+        
+        // Create a new network object to avoid reference issues
+        mergedContracts[networkId] = { 
+          ...mergedContracts[networkId],
+          "UniversalRouter": {
+            address: formattedAddress,
+            abi: parsedAbi,
+            inheritedFunctions: {}
+          }
+        };
+      } else if (isLiquidityPool) {
+        mergedContracts[networkId] = {
+          ...mergedContracts[networkId],
+          "LiquidityPoolManager": {
+            address: formattedAddress,
+            abi: parsedAbi,
+            inheritedFunctions: {}
+          }
         };
       } else if (isPositionManager) {
-        mergedContracts[networkId]["PositionManager"] = {
-          address: formattedAddress,
-          abi: parsedAbi,
-          inheritedFunctions: {}
+        mergedContracts[networkId] = {
+          ...mergedContracts[networkId], 
+          "PositionManager": {
+            address: formattedAddress,
+            abi: parsedAbi,
+            inheritedFunctions: {}
+          }
         };
       } else {
-        mergedContracts[networkId]["YourContract"] = {
-          address: formattedAddress,
-          abi: parsedAbi,
-          inheritedFunctions: {}
+        mergedContracts[networkId] = {
+          ...mergedContracts[networkId],
+          "YourContract": {
+            address: formattedAddress,
+            abi: parsedAbi,
+            inheritedFunctions: {}
+          }
         };
       }
       
       // Set the merged contracts in the store
+      console.log("Setting contracts:", mergedContracts);
       await setContracts(mergedContracts);
       
       // Debug information
       console.log("Contract detection results:", {
+        isRouter,
         isLiquidityPool,
         isPositionManager,
         networkId,
-        contractKey: isLiquidityPool ? "LiquidityPoolManager" : isPositionManager ? "PositionManager" : "YourContract",
-        contractType: isLiquidityPool ? "LiquidityPoolManager" : isPositionManager ? "PositionManager" : "YourContract"
+        contractKey: isRouter ? "UniversalRouter" :
+                    isLiquidityPool ? "LiquidityPoolManager" : 
+                    isPositionManager ? "PositionManager" : 
+                    "YourContract",
       });
       
-      console.log("Merged contracts structure:", JSON.stringify(mergedContracts, null, 2));
+      // Wait a bit to ensure state updates propagate
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Wait for the state to update
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Verify the contract was added correctly
+      const updatedContracts = useContractStore.getState().contracts;
+      console.log("Updated contracts:", updatedContracts);
+      console.log(`Checking for ${networkId}.UniversalRouter:`, 
+        updatedContracts[networkId]?.UniversalRouter ? "Found" : "Not found");
       
-      // Get all contracts and verify the contract was set
-      const allContracts = getAllContracts();
-      console.log("All contracts after setting:", allContracts);
-      
-      // Check if position manager was added correctly if that's what we were trying to add
-      if (isPositionManager) {
-        console.log("Position Manager in contracts:", allContracts[networkId]?.PositionManager);
-        
-        // Force reload contract data to see if that helps
-        const refreshedContracts = useContractStore.getState().contracts;
-        console.log("Refreshed contracts:", refreshedContracts);
-        console.log("Position Manager in refreshed contracts:", refreshedContracts[networkId]?.PositionManager);
-      }
-      
-      // Check if the contract exists for the selected network
-      let contractKey = "YourContract";
-      if (isLiquidityPool) {
-        contractKey = "LiquidityPoolManager";
-      } else if (isPositionManager) {
-        contractKey = "PositionManager";
-      }
-      
-      if (!allContracts[networkId] || !allContracts[networkId][contractKey]) {
-        console.error("Contract not found for network ID:", networkId);
-        console.error("Available contracts:", allContracts);
-        throw new Error("Contract not set properly for the selected network");
-      }
-      
+      // Set up the appropriate interface
       setIsContractLoaded(true);
       setShowTableView(true);
       setShowTutorial(false);
 
       // Set the appropriate interface based on contract type
-      if (isLiquidityPool || isPositionManager) {
-        // Use liquidity interface for both pool manager and position manager
+      if (isRouter) {
+        setContractInterface('swap');
+        notification.success("Universal Router contract detected!");
+      } else if (isLiquidityPool || isPositionManager) {
         setContractInterface('liquidity');
-        if (isLiquidityPool) {
-          notification.success("Liquidity pool contract detected!");
-        } else {
-          notification.success("Position manager contract detected!");
-        }
+        notification.success(isLiquidityPool ? 
+          "Liquidity pool contract detected!" : 
+          "Position manager contract detected!");
+      } else if (isPoolManagerSingleton) {
+        setContractInterface('swap');
+        notification.success("Pool Manager contract detected!");
       } else if (isWrappable) {
         setContractInterface('wrap');
         notification.success("Wrapped token contract detected!");
       } else if (isBridge) {
         setContractInterface('bridge');
         notification.success("Bridge contract detected!");
-      } else if (isUniversalRouter) {
-        setContractInterface('swap');
-        notification.success("Router contract detected!");
       } else if (isERC20) {
         setContractInterface('erc20');
         notification.success("ERC20 token contract detected!");
@@ -800,6 +862,7 @@ const Home: NextPage = () => {
                 {contractInterface === 'wrap' && <WrapInterface />}
                 {contractInterface === 'bridge' && <BridgeInterface />}
                 {contractInterface === 'liquidity' && <LiquidityInterface />}
+                {contractInterface === 'swap' && <SwapInterface />}
                 {contractInterface === 'readwrite' && <ReadWriteInterface />}
               </Suspense>
             </div>
