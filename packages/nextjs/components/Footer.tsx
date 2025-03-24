@@ -25,7 +25,7 @@ export const Footer = () => {
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
           <div className="flex gap-4 items-center">
             <Link
-              href="https://github.com/muhammadaus/PureContracts"
+              href="https://github.com/muhammadaus/WrapTX"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"

@@ -73,7 +73,7 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     console.log('Initializing AppKit in wrap interface...');
     // Project metadata
     const metadata = {
-      name: 'PureContracts Wrap',
+      name: 'WrapTX Wrap',
       description: 'Wrap and unwrap tokens',
       url: 'https://reown.net',
       icons: ['https://reown.net/images/logo.png'],

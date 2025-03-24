@@ -26,9 +26,9 @@ try {
   createAppKit({
     projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
     metadata: {
-      name: 'PureContracts',
+      name: 'WrapTX',
       description: 'Token Wrapper',
-      url: window?.location?.origin || 'https://purecontracts.com',
+      url: window?.location?.origin || 'https://WrapTX.com',
       icons: ['https://avatars.githubusercontent.com/u/37784886'],
     },
     networks: [mainnet, sepolia, arbitrum],

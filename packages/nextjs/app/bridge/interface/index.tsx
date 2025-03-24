@@ -24,7 +24,7 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     console.log('Initializing AppKit in bridge interface...');
     // Project metadata
     const metadata = {
-      name: 'PureContracts Bridge',
+      name: 'WrapTX Bridge',
       description: 'Bridge assets across networks',
       url: 'https://reown.net',
       icons: ['https://reown.net/images/logo.png'],

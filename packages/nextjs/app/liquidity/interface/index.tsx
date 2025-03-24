@@ -25,7 +25,7 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     console.log('Initializing AppKit in Liquidity Pool interface...');
     // Project metadata
     const metadata = {
-      name: 'PureContracts Liquidity',
+      name: 'WrapTX Liquidity',
       description: 'Create and manage liquidity pools',
       url: 'https://reown.net',
       icons: ['https://reown.net/images/logo.png'],

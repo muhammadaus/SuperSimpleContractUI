@@ -30,10 +30,10 @@ export async function initializeWalletKit() {
   walletKitInstance = await WalletKit.init({
     core,
     metadata: {
-      name: 'PureContracts',
+      name: 'WrapTX',
       description: 'Secure and transparent smart contract interactions',
-      url: 'https://purecontracts.com',
-      icons: ['https://purecontracts.com/logo.png'], // Replace with your actual logo URL
+      url: 'https://WrapTX.com',
+      icons: ['https://WrapTX.com/logo.png'], // Replace with your actual logo URL
     },
   });
 

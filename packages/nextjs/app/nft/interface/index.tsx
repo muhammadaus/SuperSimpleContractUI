@@ -25,7 +25,7 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     console.log('Initializing AppKit in NFT interface...');
     // Project metadata
     const metadata = {
-      name: 'PureContracts NFT',
+      name: 'WrapTX NFT',
       description: 'Interact with NFT tokens',
       url: 'https://reown.net',
       icons: ['https://reown.net/images/logo.png'],

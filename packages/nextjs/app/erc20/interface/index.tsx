@@ -25,7 +25,7 @@ if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
     console.log('Initializing AppKit in ERC20 interface...');
     // Project metadata
     const metadata = {
-      name: 'PureContracts ERC20',
+      name: 'WrapTX ERC20',
       description: 'Interact with ERC20 tokens',
       url: 'https://reown.net',
       icons: ['https://reown.net/images/logo.png'],

@@ -1,6 +1,6 @@
-# PureContracts Next.js App
+# WrapTX Next.js App
 
-This is the Next.js frontend for the PureContracts application.
+This is the Next.js frontend for the WrapTX application.
 
 ## Getting Started
 

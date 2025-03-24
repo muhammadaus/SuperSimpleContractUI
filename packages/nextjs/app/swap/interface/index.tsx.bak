@@ -730,7 +730,7 @@ export default function SwapInterface() {
           generateV3RouterCommands();
         } else {
           console.log("Generating V4 router commands...");
-        generateRouterCommands();
+          generateRouterCommands();
         }
         return; // Wait for commands to be generated first
       }
@@ -918,14 +918,14 @@ export default function SwapInterface() {
               
               // Sort token addresses for the pool key
               // Must use toLowerCase() for proper string comparison
-        const [token0, token1] = [formattedTokenIn, formattedTokenOut].sort((a, b) => 
-          a.toLowerCase() < b.toLowerCase() ? -1 : 1
-        );
-        
+              const [token0, token1] = [formattedTokenIn, formattedTokenOut].sort((a, b) => 
+                a.toLowerCase() < b.toLowerCase() ? -1 : 1
+              );
+              
               // Log the parameters we're using to check for the pool
               console.log("Checking for V4 pool with parameters:", {
-          token0,
-          token1,
+                token0, 
+                token1, 
                 fee: feeTier, // use selected fee tier
                 tickSpacing: getTickSpacing(feeTier) // use matching tick spacing
               });
@@ -992,7 +992,7 @@ export default function SwapInterface() {
 
         // Log full transaction data
         console.log("Full transaction data:", txData);
-        
+
         // Create transaction parameters with explicit gas settings
         const txParams = {
           to: contractAddress,
@@ -1334,8 +1334,8 @@ export default function SwapInterface() {
       
       // Create transaction parameters for static call
       const txParams = {
-            to: contractAddress,
-            data: txData,
+        to: contractAddress,
+        data: txData,
         value: parsedAmountIn.toString(),
       };
       
@@ -1876,7 +1876,10 @@ async function testRouterCommands(
         inputs = ["0x"];
       }
       
+      // Create transaction data
+      const txData = routerInterface.encodeFunctionData("execute", [commandByte, inputs, deadline]);
       
+      // Replace with:
       // Create transaction data with explicit function signature to avoid ambiguity
       const txData = routerInterface.encodeFunctionData(
         EXECUTE_WITH_DEADLINE_SIG, 
