@@ -122,7 +122,7 @@ interface FunctionInputValue {
 }
 
 // Main component with AppKit hooks - only rendered when AppKit is initialized
-function ReadWriteInterface(): JSX.Element {
+function ReadWriteInterface() {
   const [contractName, setContractName] = useState<string>("");
   const [functions, setFunctions] = useState<FunctionData[]>([]);
   const [readFunctions, setReadFunctions] = useState<FunctionData[]>([]);
@@ -549,127 +549,105 @@ function ReadWriteInterface(): JSX.Element {
     }
   };
 
-  // Add this logging function to help with transaction debugging
-  const logDebug = (message: string, data?: any) => {
-    const timestamp = new Date().toISOString();
-    if (data) {
-      console.log(`[${timestamp}] ${message}:`, data);
-    } else {
-      console.log(`[${timestamp}] ${message}`);
-    }
-  };
-  
-  // Dedicated wallet connector that doesn't try to run any transactions
-  const connectWallet = async (functionName: string): Promise<boolean> => {
-    logDebug(`Connecting wallet for function: ${functionName}`);
-    
-    if (isConnected && userAddress && walletProvider) {
-      logDebug("Wallet already connected, no action needed");
-      return true;
-    }
-    
-    try {
-      if (typeof window !== 'undefined') {
-        const timestamp = Date.now().toString();
-        window.sessionStorage.setItem('walletConnectionInProgress', 'true');
-        window.sessionStorage.setItem('walletConnectionTimestamp', timestamp);
-        window.sessionStorage.setItem('pendingFunctionName', functionName);
-        
-        logDebug("Storing connection data for pending execution", { 
-          timestamp,
-          functionName
-        });
-      }
-      
-      logDebug("Opening wallet connection UI only...");
-      notification.info("Please connect your wallet first");
-      openAppKit();
-      
-      // Set a timeout to clear connection flags
-      setTimeout(() => {
-        if (typeof window !== 'undefined') {
-          logDebug("Connection timeout - clearing connection progress flags");
-          window.sessionStorage.removeItem('walletConnectionInProgress');
-          window.sessionStorage.removeItem('walletConnectionTimestamp');
-        }
-      }, 30000);
-      
-      return false; // Wallet connection was initiated but not completed
-    } catch (error) {
-      console.error("Error initiating wallet connection:", error);
-      // Clear all flags on error
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.removeItem('walletConnectionInProgress');
-        window.sessionStorage.removeItem('walletConnectionTimestamp');
-        window.sessionStorage.removeItem('pendingFunctionName');
-        window.sessionStorage.removeItem('pendingInputValues');
-      }
-      return false;
-    }
-  };
-
-  // Enhanced write function that first checks wallet connection
   const callWriteFunction = async (func: FunctionData) => {
-    logDebug(`Transaction button clicked for function: ${func.name}`);
+    if (!contractData?.address) {
+      console.error("Cannot call write function: Contract address not available");
+      return;
+    }
     
-    // Clear any old errors first
+    console.log(`Attempting to call write function: ${func.name}`);
+    setIsLoading(prev => ({ ...prev, [func.name]: true }));
     setErrorMessages(prev => ({ ...prev, [func.name]: '' }));
     
-    // Check for wallet connection first
-    if (!isConnected || !userAddress || !walletProvider) {
-      console.log("No wallet connection detected, initiating connection...");
+    // Check for pending transactions or connection in progress
+    if (typeof window !== 'undefined') {
+      const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
+      const pendingFunctionTx = window.sessionStorage.getItem('pendingFunctionTx');
+      const pendingFunctionName = window.sessionStorage.getItem('pendingFunctionName');
+      const pendingInputValues = window.sessionStorage.getItem('pendingInputValues');
       
-      // Store current inputs for later
-      if (typeof window !== 'undefined' && functionInputs[func.name]) {
-        window.sessionStorage.setItem('pendingInputValues', JSON.stringify({
-          functionName: func.name,
-          inputs: functionInputs[func.name]
-        }));
-        console.log("Stored inputs for later execution:", functionInputs[func.name]);
-      }
+      console.log("Connection state check:", {
+        connectionInProgress,
+        pendingFunctionTx: pendingFunctionTx ? "exists" : "none",
+        pendingFunctionName,
+        pendingInputValues: pendingInputValues ? "exists" : "none"
+      });
       
-      // Just connect the wallet and return immediately - don't proceed with transaction
-      const connected = await connectWallet(func.name);
-      
-      if (!connected) {
-        console.log("Wallet connection initiated but not completed. Stopping execution flow.");
+      if (connectionInProgress || pendingFunctionTx || pendingFunctionName || pendingInputValues) {
+        console.warn("Pending transaction or connection in progress detected");
+        notification.info("There's a pending transaction or connection in progress. Please wait or reset connection state.");
+        setIsLoading(prev => ({ ...prev, [func.name]: false }));
         return;
       }
     }
     
-    // If we got here, the wallet is connected, so we can proceed with the actual execution
-    console.log(`Wallet connected. Now proceeding with execution of ${func.name}...`);
-    
-    // Start loading state for this function
-    setIsLoading(prev => ({ ...prev, [func.name]: true }));
-    
-    try {
-      // Continue with the transaction flow only if we have a connected wallet
-      if (!contractData?.address) {
-        throw new Error("Contract address not available");
-      }
+    // Check if wallet is connected, if not prompt to connect
+    if (!isConnected || !userAddress) {
+      console.log("Wallet not connected. Prompting connection...");
+      notification.info("Please connect your wallet first");
       
-      // Check for pending transactions or connection in progress
-      if (typeof window !== 'undefined') {
-        const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
-        const pendingFunctionTx = window.sessionStorage.getItem('pendingFunctionTx');
-        const pendingFunctionName = window.sessionStorage.getItem('pendingFunctionName');
-        const pendingInputValues = window.sessionStorage.getItem('pendingInputValues');
+      try {
+        // Set a flag to indicate connection is in progress
+        if (typeof window !== 'undefined') {
+          const timestamp = Date.now().toString();
+          window.sessionStorage.setItem('walletConnectionInProgress', 'true');
+          window.sessionStorage.setItem('walletConnectionTimestamp', timestamp);
+          window.sessionStorage.setItem('pendingFunctionName', func.name);
+          
+          console.log("Storing connection data:", { 
+            timestamp,
+            functionName: func.name,
+            hasInputs: !!functionInputs[func.name]
+          });
+          
+          // Store input values ONLY to be used when wallet actually connects
+          window.sessionStorage.setItem('pendingInputValues', JSON.stringify({
+            functionName: func.name,
+            inputs: functionInputs[func.name]
+          }));
+        }
         
-        console.log("Connection state check:", {
-          connectionInProgress,
-          pendingFunctionTx: pendingFunctionTx ? "exists" : "none",
-          pendingFunctionName,
-          pendingInputValues: pendingInputValues ? "exists" : "none"
-        });
+        // Open the wallet connection UI
+        console.log("Opening AppKit wallet connection UI");
+        openAppKit();
         
-        if (connectionInProgress || pendingFunctionTx || pendingFunctionName || pendingInputValues) {
-          console.warn("Pending transaction or connection in progress detected");
-          notification.info("There's a pending transaction or connection in progress. Please wait or reset connection state.");
-          throw new Error("Pending transaction or connection in progress");
+        // Clear connection flag after a timeout to prevent blocking future attempts
+        setTimeout(() => {
+          if (typeof window !== 'undefined') {
+            console.log("Connection timeout - clearing connection progress flags");
+            window.sessionStorage.removeItem('walletConnectionInProgress');
+            window.sessionStorage.removeItem('walletConnectionTimestamp');
+          }
+        }, 30000); // 30 seconds timeout for connection attempt
+        
+      } catch (error) {
+        console.error("Error opening wallet connection UI:", error);
+        notification.error("Could not open wallet connection");
+        // Clear all flags on error
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+          window.sessionStorage.removeItem('pendingFunctionName');
+          window.sessionStorage.removeItem('pendingInputValues');
         }
       }
       
+      // Turn off loading state while wallet connection happens
+      setIsLoading(prev => ({ ...prev, [func.name]: false }));
+      return;
+    }
+    
+    // Enhance wallet provider check
+    if (!walletProvider) {
+      console.error("Wallet is connected but provider is not available");
+      notification.error("Wallet is connected but provider is not available. Please try again or reset connection state.");
+      setIsLoading(prev => ({ ...prev, [func.name]: false }));
+      return;
+    }
+    
+    console.log(`Wallet connected and provider available. Proceeding with ${func.name} execution...`);
+    
+    try {
       // Prepare the arguments
       let args: any[] = [];
       try {
@@ -693,7 +671,12 @@ function ReadWriteInterface(): JSX.Element {
         });
       } catch (error) {
         console.error("Error parsing function inputs:", error);
-        throw new Error(`Invalid input: ${(error as Error).message}`);
+        setErrorMessages(prev => ({ 
+          ...prev, 
+          [func.name]: `Invalid input: ${(error as Error).message}` 
+        }));
+        setIsLoading(prev => ({ ...prev, [func.name]: false }));
+        return;
       }
       
       // If function is payable, determine the ETH value to send
@@ -711,7 +694,7 @@ function ReadWriteInterface(): JSX.Element {
       
       // Check if user is on the correct network
       if (currentChainId !== targetNetwork.id) {
-        logDebug(`User on chain ${currentChainId}, but target is ${targetNetwork.id}`);
+        console.log(`User on chain ${currentChainId}, but target is ${targetNetwork.id}`);
         notification.info(`You need to switch to ${targetNetwork.name} to interact with this contract`);
         
         try {
@@ -720,226 +703,137 @@ function ReadWriteInterface(): JSX.Element {
             throw new Error("Wallet provider not available for network switching");
           }
           
-          // For Rabby wallet, provide clear instructions
-          logDebug("Attempting to switch network - if using Rabby Wallet, you may need to approve the switch manually");
-          notification.info(`Please approve the network switch to ${targetNetwork.name} in your wallet`);
+          // Set loading state during network switch
+          setIsLoading(prev => ({ ...prev, [func.name]: true }));
           
           try {
-            // Request to switch chain
-            logDebug(`Requesting wallet to switch to chainId: 0x${targetNetwork.id.toString(16)}`);
+            // First try to switch to the chain
             await walletProvider.request({
               method: 'wallet_switchEthereumChain',
               params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
             });
             
-            // Give more time for Rabby Wallet to process the switch
-            logDebug("Network switch requested - waiting for 3 seconds to complete...");
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            // Check if switch was successful after waiting
+            // Check if switch was successful
             if (currentChainId !== targetNetwork.id) {
-              // Get the current chain ID again to see if it has updated
-              let updatedChainId;
-              try {
-                updatedChainId = await walletProvider.request({ method: 'eth_chainId' });
-                updatedChainId = parseInt(updatedChainId, 16);
-                logDebug(`After waiting, current chain ID is now: ${updatedChainId}`);
-              } catch (err) {
-                logDebug(`Error getting updated chain ID: ${err}`);
-              }
+              // Wait briefly for chainId to update
+              await new Promise(resolve => setTimeout(resolve, 1000));
               
-              // If still not on the right network
-              if (updatedChainId !== targetNetwork.id) {
-                logDebug(`Network switch still pending - the wallet UI may need manual interaction`);
-                notification.info("Please manually select the correct network in your wallet");
-                throw new Error(`Please switch to ${targetNetwork.name} in your wallet and try again`);
+              // If still not on the right network, throw an error
+              if (currentChainId !== targetNetwork.id) {
+                throw new Error("Network switch was requested but did not complete");
               }
             }
             
-            logDebug(`Successfully switched to ${targetNetwork.name}`);
             notification.success(`Switched to ${targetNetwork.name}!`);
           } catch (switchError: any) {
-            // Check for specific Rabby Wallet errors
-            const errorMsg = switchError?.message || '';
-            logDebug(`Network switch error: ${errorMsg}`);
-            
-            if (errorMsg.includes("Request already processing") || 
-                errorMsg.includes("Connection declined") ||
-                errorMsg.includes("Request already sent")) {
-              notification.info("There is already a pending network switch request. Please check your wallet");
-              throw new Error("Wallet has a pending request. Please complete it or reset your wallet connection");
-            }
-            
-            // If the chain hasn't been added to the wallet yet
+            // If the chain hasn't been added to the wallet yet, try to add it
             if (switchError.code === 4902 || 
-                errorMsg.includes('wallet_addEthereumChain') ||
-                errorMsg.includes('Unrecognized chain ID')) {
-              // Give instructions for adding the network
-              notification.info(`${targetNetwork.name} network needs to be added to your wallet. Please add it manually.`);
-              
-              // Generate basic network params for the most common networks
-              const networkParams = {
-                chainId: `0x${targetNetwork.id.toString(16)}`,
-                chainName: targetNetwork.name,
-                nativeCurrency: {
-                  name: targetNetwork.name === "Base Sepolia" ? "Ether" : "Ether",
-                  symbol: targetNetwork.name === "Base Sepolia" ? "ETH" : "ETH",
-                  decimals: 18
-                },
-                rpcUrls: [targetNetwork.name === "Base Sepolia" ? "https://sepolia.base.org" : ""],
-                blockExplorerUrls: [targetNetwork.name === "Base Sepolia" ? "https://sepolia.basescan.org" : ""]
-              };
-              
-              logDebug(`Attempting to add network with params:`, networkParams);
-              
-              try {
-                // Try to add the chain
-                await walletProvider.request({
-                  method: 'wallet_addEthereumChain',
-                  params: [networkParams],
-                });
-                notification.info("Please approve adding the network in your wallet");
-              } catch (addError) {
-                logDebug(`Error adding network: ${addError}`);
-                notification.error(`Could not add ${targetNetwork.name}. Please add it manually in your wallet settings.`);
-                throw new Error(`Could not add ${targetNetwork.name}`);
-              }
-              
-              throw new Error(`Please add ${targetNetwork.name} to your wallet and try again`);
+                switchError.message?.includes('wallet_addEthereumChain') ||
+                switchError.message?.includes('Unrecognized chain ID')) {
+              // Note: Add chain implementation would go here
+              // This is simplified for now
+              notification.error(`Could not switch to ${targetNetwork.name}. Please add the network to your wallet.`);
+              setIsLoading(prev => ({ ...prev, [func.name]: false }));
+              return;
             } else {
-              logDebug(`Unexpected error during network switch: ${errorMsg}`);
+              console.error("Error switching chain:", switchError);
               notification.error(`Could not switch to ${targetNetwork.name}`);
-              throw new Error(`Could not switch to ${targetNetwork.name}`);
+              setIsLoading(prev => ({ ...prev, [func.name]: false }));
+              return;
             }
           }
         } catch (switchError) {
-          logDebug(`Network switching failed: ${(switchError as Error).message}`);
-          notification.error(`Network switching failed: ${(switchError as Error).message}`);
-          throw new Error(`Could not switch to ${targetNetwork.name}: ${(switchError as Error).message}`);
+          console.error("Failed to switch network:", switchError);
+          notification.error(`Failed to switch network: ${(switchError as Error).message}`);
+          setIsLoading(prev => ({ ...prev, [func.name]: false }));
+          return;
         }
       }
-      
-      // Now proceed with the contract interaction
-      logDebug(`Starting contract interaction for ${func.name}`);
-      logDebug(`Wallet provider type: ${walletProvider?.constructor?.name || 'unknown'}`);
-      
-      logDebug("Creating ethers provider from wallet provider...");
-      const provider = new BrowserProvider(walletProvider);
-      
-      logDebug("Getting signer from provider...");
-      const signer = await provider.getSigner();
-      
-      const signerAddress = await signer.getAddress();
-      logDebug(`Using signer with address: ${signerAddress}`);
-      
-      logDebug(`Creating contract instance at ${contractData.address}...`);
-      const contract = new Contract(
-        contractData.address as string,
-        contractData.abi,
-        signer
-      );
-      
-      // Prepare transaction options
-      const options = func.stateMutability === 'payable' 
-        ? { value: ethValue } 
-        : {};
-      
-      const safeArgs = args.map(arg => 
-        typeof arg === 'bigint' ? arg.toString() : arg
-      );
-      logDebug(`Calling ${func.name} with args:`, safeArgs);
-      
-      // Special debug logs for execute function
-      if (func.name === 'execute') {
-        logDebug('EXECUTE FUNCTION DETAILS:', {
-          commands: safeArgs[0],
-          inputsLength: Array.isArray(safeArgs[1]) ? safeArgs[1].length : 'not an array',
-          firstInput: Array.isArray(safeArgs[1]) && safeArgs[1].length > 0 ? safeArgs[1][0] : 'none'
-        });
-      }
-      
-      // Call the contract function with args
-      notification.info(`Please confirm the transaction in your wallet...`);
-      logDebug(`Requesting wallet signature for ${func.name} transaction...`);
-      
-      const tx = await contract[func.name](...args, options);
-      logDebug(`Transaction successfully sent with hash: ${tx.hash}`);
-      notification.success(`Transaction sent: ${tx.hash}`);
-      
-      // Wait for transaction confirmation
+
+      // Contract interaction logic
       try {
-        console.log(`Waiting for transaction ${tx.hash} to be confirmed...`);
-        const receipt = await tx.wait(1);
-        console.log(`Transaction confirmed in block ${receipt.blockNumber}`);
-        notification.success(`Transaction confirmed in block ${receipt.blockNumber}!`);
-      } catch (confirmError) {
-        console.warn("Could not confirm transaction:", confirmError);
-        notification.info(`Transaction sent (${tx.hash}), but confirmation status is unknown`);
-      }
-      
-      // Reset input values after successful transaction
-      const updatedInputs = { ...functionInputs };
-      func.inputs.forEach(input => {
-        updatedInputs[func.name][input.name] = '';
-      });
-      if (func.stateMutability === 'payable') {
-        updatedInputs[func.name]['_value'] = '';
-      }
-      setFunctionInputs(updatedInputs);
-      
-      // Clear any connection flags
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.removeItem('walletConnectionInProgress');
-        window.sessionStorage.removeItem('walletConnectionTimestamp');
-        window.sessionStorage.removeItem('pendingFunctionName');
-        window.sessionStorage.removeItem('pendingInputValues');
-        window.sessionStorage.removeItem('pendingFunctionTx');
+        console.log("Creating ethers provider from wallet provider...");
+        const provider = new BrowserProvider(walletProvider);
+        
+        console.log("Getting signer from provider...");
+        const signer = await provider.getSigner();
+        
+        console.log(`Signer address: ${await signer.getAddress()}`);
+        
+        console.log(`Creating contract instance at ${contractData.address}...`);
+        const contract = new Contract(
+          contractData.address as string,
+          contractData.abi,
+          signer
+        );
+        
+        // Prepare transaction options
+        const options = func.stateMutability === 'payable' 
+          ? { value: ethValue } 
+          : {};
+        
+        console.log(`Calling ${func.name} with args:`, args.map(arg => 
+          typeof arg === 'bigint' ? arg.toString() : arg
+        ));
+        
+        // Call the contract function with args
+        notification.info(`Please confirm the transaction in your wallet...`);
+        const tx = await contract[func.name](...args, options);
+        
+        console.log(`Transaction sent: ${tx.hash}`);
+        notification.success(`Transaction sent: ${tx.hash}`);
+        
+        // Wait for transaction confirmation
+        try {
+          console.log(`Waiting for transaction ${tx.hash} to be confirmed...`);
+          const receipt = await tx.wait(1);
+          console.log(`Transaction confirmed in block ${receipt.blockNumber}`);
+          notification.success(`Transaction confirmed in block ${receipt.blockNumber}!`);
+        } catch (confirmError) {
+          console.warn("Could not confirm transaction:", confirmError);
+          notification.info(`Transaction sent (${tx.hash}), but confirmation status is unknown`);
+        }
+        
+        // Reset input values after successful transaction
+        const updatedInputs = { ...functionInputs };
+        func.inputs.forEach(input => {
+          updatedInputs[func.name][input.name] = '';
+        });
+        if (func.stateMutability === 'payable') {
+          updatedInputs[func.name]['_value'] = '';
+        }
+        setFunctionInputs(updatedInputs);
+      } catch (error) {
+        console.error(`Error executing ${func.name}:`, error);
+        
+        // User rejection handling
+        if ((error as any).code === 4001 || 
+            String(error).includes('user rejected') || 
+            String(error).includes('User rejected')) {
+          notification.error("Transaction was rejected by user");
+        } else {
+          // Network related errors
+          if (String(error).includes('network') || String(error).includes('chain')) {
+            notification.error(`Network error: ${(error as Error).message}`);
+          } else {
+            notification.error(`Error: ${(error as Error).message}`);
+          }
+        }
+      } finally {
+        setIsLoading(prev => ({ ...prev, [func.name]: false }));
+        
+        // Clear any connection flags
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+          window.sessionStorage.removeItem('pendingFunctionName');
+        }
       }
     } catch (error) {
-      console.error(`Error executing ${func.name}:`, error);
-      let errorMessage = '';
-      
-      // User rejection handling
-      if ((error as any).code === 4001 || 
-          String(error).includes('user rejected') || 
-          String(error).includes('User rejected')) {
-        errorMessage = "Transaction rejected by user";
-        notification.error(errorMessage);
-      } 
-      // Network related errors
-      else if (String(error).includes('network') || String(error).includes('chain')) {
-        errorMessage = `Network error: ${(error as Error).message}`;
-        notification.error(errorMessage);
-      }
-      // Input validation errors
-      else if (String(error).includes('Invalid input')) {
-        errorMessage = (error as Error).message;
-        notification.error(errorMessage);
-      }
-      // Pending transaction errors
-      else if (String(error).includes('pending transaction')) {
-        errorMessage = (error as Error).message;
-        notification.info(`${errorMessage}. Please reset connection state and try again.`);
-      }
-      // General errors
-      else {
-        errorMessage = (error as Error).message || 'Unknown error';
-        notification.error(`Error: ${errorMessage}`);
-      }
-      
-      // Set the error message in state
+      console.error(`Error processing ${func.name}:`, error);
+      const errorMessage = (error as Error).message || 'Unknown error';
       setErrorMessages(prev => ({ ...prev, [func.name]: errorMessage }));
-    } finally {
-      setIsLoading(prev => ({ ...prev, [func.name]: false }));
-      
-      // If there was an error, make sure we don't leave dangling connection flags
-      if (typeof window !== 'undefined') {
-        // Only clear walletConnectionInProgress and timestamp if we're not currently in the connection process
-        const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
-        if (!connectionInProgress) {
-          window.sessionStorage.removeItem('walletConnectionTimestamp');
-        }
-      }
+      notification.error(`Error: ${errorMessage}`);
     }
   };
 
@@ -1075,48 +969,9 @@ function ReadWriteInterface(): JSX.Element {
     );
   };
 
-  // Function to reset wallet pending requests
-  const resetWalletRequests = async () => {
-    logDebug("Attempting to reset wallet pending requests");
-    
-    try {
-      if (walletProvider && walletProvider.request) {
-        // Some wallets support this method to clear pending requests
-        try {
-          await walletProvider.request({
-            method: 'wallet_cancelPendingRequests',
-            params: []
-          });
-          logDebug("Successfully sent wallet_cancelPendingRequests");
-        } catch (err) {
-          logDebug(`wallet_cancelPendingRequests not supported: ${err}`);
-        }
-      }
-      
-      // Rabby specific disconnection approach
-      if (isConnected && disconnect) {
-        try {
-          logDebug("Disconnecting wallet to clear pending requests");
-          await disconnect();
-          logDebug("Wallet disconnected successfully");
-        } catch (err) {
-          logDebug(`Error disconnecting wallet: ${err}`);
-        }
-      }
-      
-      return true;
-    } catch (err) {
-      logDebug(`Error resetting wallet requests: ${err}`);
-      return false;
-    }
-  };
-
-  // Enhanced connection reset function
-  const resetConnectionState = async () => {
-    logDebug("Resetting all connection state...");
-    
-    // First try to reset any pending wallet requests
-    await resetWalletRequests();
+  // Function to clear all connection flags and state
+  const resetConnectionState = () => {
+    console.log("Resetting all connection state...");
     
     if (typeof window !== 'undefined') {
       // Clear all session storage items related to transactions
@@ -1131,7 +986,7 @@ function ReadWriteInterface(): JSX.Element {
       keysToRemove.forEach(key => {
         const value = window.sessionStorage.getItem(key);
         if (value) {
-          logDebug(`Removing session storage item: ${key} (value existed)`);
+          console.log(`Removing session storage item: ${key} (value existed)`);
         }
         window.sessionStorage.removeItem(key);
       });
@@ -1145,7 +1000,7 @@ function ReadWriteInterface(): JSX.Element {
           });
         });
         setFunctionInputs(cleanInputs);
-        logDebug("Reset all function inputs");
+        console.log("Reset all function inputs");
       } catch (error) {
         console.error("Error resetting function inputs:", error);
       }
@@ -1157,7 +1012,7 @@ function ReadWriteInterface(): JSX.Element {
           resetLoading[key] = false;
         });
         setIsLoading(resetLoading);
-        logDebug("Reset all loading states");
+        console.log("Reset all loading states");
       } catch (error) {
         console.error("Error resetting loading states:", error);
       }
@@ -1169,14 +1024,14 @@ function ReadWriteInterface(): JSX.Element {
           resetErrors[key] = '';
         });
         setErrorMessages(resetErrors);
-        logDebug("Reset all error messages");
+        console.log("Reset all error messages");
       } catch (error) {
         console.error("Error resetting error messages:", error);
       }
       
       // Also disconnect if connected
       if (isConnected) {
-        logDebug("Disconnecting wallet as part of reset...");
+        console.log("Disconnecting wallet as part of reset...");
         try {
           disconnect();
         } catch (error) {
@@ -1234,63 +1089,11 @@ function ReadWriteInterface(): JSX.Element {
                 Disconnect
               </button>
               <button
-                onClick={async () => {
-                  setIsLoading(prev => ({ ...prev, reset: true }));
-                  try {
-                    await resetConnectionState();
-                  } catch (err) {
-                    console.error("Error during reset:", err);
-                  } finally {
-                    setIsLoading(prev => ({ ...prev, reset: false }));
-                  }
-                }}
-                disabled={isLoading.reset}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-gray-300 text-xs relative"
+                onClick={resetConnectionState}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-gray-300 text-xs"
               >
-                {isLoading.reset ? (
-                  <>
-                    <span className="opacity-0">Reset Connection</span>
-                    <span className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-3 h-3 rounded-full border-t-2 border-b-2 border-white animate-spin"></div>
-                    </span>
-                  </>
-                ) : (
-                  "Reset Connection"
-                )}
+                Reset Connection
               </button>
-              {currentChainId !== targetNetwork.id && (
-                <button
-                  onClick={async () => {
-                    if (!walletProvider) return;
-                    setIsLoading(prev => ({ ...prev, switchNetwork: true }));
-                    try {
-                      await walletProvider.request({
-                        method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
-                      });
-                      notification.info(`Switching to ${targetNetwork.name}...`);
-                    } catch (err) {
-                      console.error("Error switching network:", err);
-                      notification.error("Failed to switch network");
-                    } finally {
-                      setIsLoading(prev => ({ ...prev, switchNetwork: false }));
-                    }
-                  }}
-                  disabled={isLoading.switchNetwork}
-                  className="px-3 py-1 bg-blue-700/50 hover:bg-blue-700 rounded-lg transition-colors text-blue-300 text-xs relative"
-                >
-                  {isLoading.switchNetwork ? (
-                    <>
-                      <span className="opacity-0">Switch Network</span>
-                      <span className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-3 h-3 rounded-full border-t-2 border-b-2 border-white animate-spin"></div>
-                      </span>
-                    </>
-                  ) : (
-                    `Switch to ${targetNetwork.name}`
-                  )}
-                </button>
-              )}
             </div>
           </div>
         )}
