@@ -26,7 +26,7 @@ const WrapInterface = dynamic(() => import('./wrap/interface'), { ssr: false });
 const BridgeInterface = dynamic(() => import('./bridge/interface'), { ssr: false });
 const LiquidityInterface = dynamic(() => import('./liquidity/interface'), { ssr: false });
 const SwapInterface = dynamic(() => import('./swap/interface'), { ssr: false });
-const ReadWriteInterface = dynamic(() => import('./readwrite/_components/ReadWrite'), { ssr: false });
+const ReadWriteInterface = dynamic(() => import('./readwrite/interface'), { ssr: false });
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof viemChains;
