@@ -1,0 +1,727 @@
+"use client";
+
+import React, { useEffect, useState } from 'react';
+import { Address, parseEther, parseUnits, formatUnits } from 'viem';
+import * as viemChains from 'viem/chains';
+import { useTargetNetwork } from '@/hooks/scaffold-eth/useTargetNetwork';
+import { useContractStore } from "@/utils/scaffold-eth/contract";
+import { notification } from "@/utils/scaffold-eth/notification";
+import { 
+  useAppKit, 
+  useAppKitAccount, 
+  useAppKitProvider, 
+  useAppKitNetwork,
+  useDisconnect,
+  createAppKit
+} from '@reown/appkit/react';
+import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import { BrowserProvider } from 'ethers';
+import { useScaffoldContract } from '@/hooks/scaffold-eth';
+import type { AppKitNetwork } from '@reown/appkit/networks';
+import { ethers } from 'ethers';
+
+// Universal Router ABI fragment for the execute function
+const ROUTER_ABI = [
+  "function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable",
+  "function execute(bytes calldata commands, bytes[] calldata inputs) external payable",
+  "function collectRewards(bytes looksRareClaim) external",
+  "function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external",
+  "function supportsInterface(bytes4 interfaceId) external pure returns (bool)",
+  "function poolManager() external view returns (address)"
+];
+
+// PoolManager ABI fragment for direct interaction
+const POOL_MANAGER_ABI = [
+  "function swap(tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, tuple(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, bytes hookData) external returns (int256)",
+  "function settle() external payable returns (uint256)",
+  "function take(address currency, address to, uint256 amount) external"
+];
+
+// Define the specific function signature for execute with deadline to avoid ambiguity
+const EXECUTE_WITH_DEADLINE_SIG = "execute(bytes,bytes[],uint256)";
+
+// Initialize AppKit at module level if not already initialized
+if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
+  try {
+    console.log('Initializing AppKit in swap interface...');
+    // Project metadata
+    const metadata = {
+      name: 'WrapTX Swap',
+      description: 'Swap tokens using Universal Router',
+      url: 'https://reown.net',
+      icons: ['https://reown.net/images/logo.png'],
+    };
+    
+    // WalletConnect project ID (get from environment or use placeholder)
+    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
+    
+    // Create ethers adapter
+    const ethersAdapter = new EthersAdapter();
+    
+    // Generate AppKit networks from all available viem chains
+    const viemChainsArray = Object.values(viemChains).filter(
+      (chain): chain is typeof viemChains.mainnet => 
+        typeof chain === 'object' && 
+        chain !== null && 
+        'id' in chain && 
+        typeof chain.id === 'number'
+    );
+    
+    // Convert viem chains to AppKit networks
+    const appKitNetworks: AppKitNetwork[] = viemChainsArray.map(chain => ({
+      id: chain.id,
+      name: chain.name || `Chain ${chain.id}`,
+      rpcUrls: {
+        default: {
+          http: chain.rpcUrls?.default?.http || [`https://rpc.ankr.com/${chain.id}`]
+        }
+      },
+      nativeCurrency: {
+        name: chain.nativeCurrency?.name || 'Ether',
+        symbol: chain.nativeCurrency?.symbol || 'ETH',
+        decimals: chain.nativeCurrency?.decimals || 18,
+      },
+      blockExplorers: chain.blockExplorers?.default 
+        ? {
+            default: {
+              url: chain.blockExplorers.default.url,
+              name: chain.blockExplorers.default.name || 'Explorer'
+            }
+          }
+        : {
+            default: {
+              url: `https://etherscan.io`,
+              name: 'Explorer'
+            }
+          }
+    }));
+    
+    // Ensure we have at least mainnet as the first item
+    const mainnetNetwork = appKitNetworks.find(n => n.id === 1);
+    if (mainnetNetwork) {
+      // Move mainnet to the beginning of the array
+      const filteredNetworks = appKitNetworks.filter(n => n.id !== 1);
+      const networks = [mainnetNetwork, ...filteredNetworks] as [AppKitNetwork, ...AppKitNetwork[]];
+      
+      console.log(`Initializing AppKit with ${networks.length} networks`);
+      console.log('Networks included:', networks.map(n => `${n.name} (${n.id})`).slice(0, 5), '...');
+      
+      createAppKit({
+        adapters: [ethersAdapter],
+        networks,
+        metadata,
+        projectId,
+        themeMode: 'dark',
+        features: {
+          analytics: true,
+        },
+        themeVariables: {
+          // Theme customization if needed
+        },
+      });
+    } else {
+      throw new Error("Mainnet network not found in viem chains");
+    }
+    
+    // Mark as initialized
+    (window as any).__APPKIT_INITIALIZED__ = true;
+    console.log('AppKit initialized in swap interface');
+  } catch (error) {
+    console.error('Error initializing AppKit:', error);
+  }
+}
+
+// Add a new function to validate the Universal Router contract
+async function validateUniversalRouter(contractAddress: string, provider: ethers.Provider): Promise<boolean> {
+  try {
+    console.log("Validating Universal Router contract at:", contractAddress);
+    
+    // 1. Check if contract exists by getting the bytecode
+    const bytecode = await provider.getCode(contractAddress);
+    if (bytecode === '0x') {
+      console.error("No bytecode at address - this is not a contract");
+      return false;
+    }
+    
+    console.log(`Contract bytecode size: ${(bytecode.length - 2) / 2} bytes`);
+    
+    // 2. Check for Universal Router function signatures in bytecode
+    const executeSignature = "0x3593564c"; // execute(bytes,bytes[],uint256)
+    const executeWithoutDeadlineSignature = "0x47ccca02"; // execute(bytes,bytes[])
+    
+    // Simple check: look for function signatures in the bytecode
+    const hasExecuteFunction = bytecode.includes(executeSignature.slice(2)); // Remove 0x prefix for search
+    const hasExecuteWithoutDeadlineFunction = bytecode.includes(executeWithoutDeadlineSignature.slice(2));
+    
+    // Log results of checks
+    console.log(`Has execute(bytes,bytes[],uint256): ${hasExecuteFunction}`);
+    console.log(`Has execute(bytes,bytes[]): ${hasExecuteWithoutDeadlineFunction}`);
+    
+    // Additional check for Universal Router by looking for collectRewards function
+    const collectRewardsSignature = "0x64f3225d"; // collectRewards(bytes)
+    const hasCollectRewardsFunction = bytecode.includes(collectRewardsSignature.slice(2));
+    console.log(`Has collectRewards(bytes): ${hasCollectRewardsFunction}`);
+    
+    // Consider it a valid Universal Router if it has at least one of the execute functions
+    // and optionally the collectRewards function
+    if (hasExecuteFunction || hasExecuteWithoutDeadlineFunction) {
+      console.log("Contract appears to be a Universal Router");
+      return true;
+    } else {
+      console.log("Contract does not match Universal Router signature");
+      return false;
+    }
+  } catch (error) {
+    console.error("Error validating Universal Router contract:", error);
+    return false;
+  }
+}
+
+// Add a simple SwapInterface component
+export default function SwapInterface() {
+  // Move these hooks inside the component
+  const { address: userAddress, isConnected } = useAppKitAccount();
+  const appKit = useAppKit();
+  
+  const [tokenIn, setTokenIn] = useState<string>('');
+  const [tokenOut, setTokenOut] = useState<string>('');
+  const [amountIn, setAmountIn] = useState<string>('');
+  const [amountOut, setAmountOut] = useState<string>('');
+  const [deadline, setDeadline] = useState<string>('30'); // Default 30 minutes
+  const [commandsHex, setCommandsHex] = useState<string>('');
+  const [inputsArray, setInputsArray] = useState<string[]>([]);
+  const [swapMode, setSwapMode] = useState<'v3' | 'v4'>('v3'); // Default to V3
+  const [directSwapMode, setDirectSwapMode] = useState<boolean>(false);
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [poolManagerAddress, setPoolManagerAddress] = useState<string | null>(null);
+  const [isTokenInNative, setIsTokenInNative] = useState<boolean>(true);
+  const [isTokenOutNative, setIsTokenOutNative] = useState<boolean>(false);
+  const [hookAddress, setHookAddress] = useState<string>('0x0000000000000000000000000000000000000000');
+  const [directSwapLogs, setDirectSwapLogs] = useState<string[]>([]);
+  const [feeTier, setFeeTier] = useState<number>(3000); // Default 0.3%
+  
+  // Function to log messages for Direct Swap
+  const logDirectSwap = (message: string) => {
+    console.log(`[Direct Swap] ${message}`);
+    setDirectSwapLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
+  
+  // Update the executeDirectSwap function with actual transaction creation
+  const executeDirectSwap = async () => {
+    // Clear previous logs
+    setDirectSwapLogs([]);
+    setIsExecuting(true);
+    
+    try {
+      // Start logging
+      logDirectSwap("Starting direct swap via Pool Manager");
+      
+      // Check wallet connection
+      if (!isConnected || !userAddress) {
+        logDirectSwap("Error: Wallet not connected");
+        notification.info("Please connect your wallet first");
+        try {
+          appKit.open();
+        } catch (error) {
+          logDirectSwap(`Error opening wallet: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        setIsExecuting(false);
+        return;
+      }
+      
+      logDirectSwap(`Wallet connected: ${userAddress}`);
+      
+      // Validate inputs
+      if (!tokenIn && !isTokenInNative) {
+        logDirectSwap("Error: Token In address is required");
+        notification.error("Token In address is required");
+        setIsExecuting(false);
+        return;
+      }
+      
+      if (!tokenOut && !isTokenOutNative) {
+        logDirectSwap("Error: Token Out address is required");
+        notification.error("Token Out address is required");
+        setIsExecuting(false);
+        return;
+      }
+      
+      if (!amountIn || parseFloat(amountIn) <= 0) {
+        logDirectSwap("Error: Amount In must be greater than 0");
+        notification.error("Amount In must be greater than 0");
+        setIsExecuting(false);
+        return;
+      }
+      
+      // Get ethers provider from AppKit
+      logDirectSwap("Getting provider from wallet...");
+      // Get ethers provider directly
+      const ethProvider = await (window as any).ethereum;
+      if (!ethProvider) {
+        logDirectSwap("Error: Could not get provider from wallet");
+        notification.error("Could not get provider from wallet");
+        setIsExecuting(false);
+        return;
+      }
+      
+      const provider = new ethers.BrowserProvider(ethProvider);
+      
+      // Get ethers signer from provider
+      logDirectSwap("Getting signer from provider...");
+      const signer = await provider.getSigner();
+
+      // Connect to Universal Router to get Pool Manager address
+      // Using fallback addresses in case the contract call fails
+      let poolManagerAddress = null;
+      logDirectSwap("Getting Pool Manager address from Universal Router...");
+      
+      // Default Universal Router addresses by network
+      const routerAddresses = {
+        1: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Ethereum Mainnet
+        5: "0xF7a0ef3C19caAA48eE6B13F26455a3aC109D4f29", // Goerli
+        137: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Polygon
+        42161: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Arbitrum
+        10: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Optimism
+        84532: "0xB059454927FE73AEC360F1A728aBb5b7B94F17C6", // Base Sepolia testnet
+        // Add more networks as needed
+      };
+      
+      // Get current network
+      const network = await provider.getNetwork();
+      const chainId = network.chainId;
+      logDirectSwap(`Connected to network with chainId: ${chainId}`);
+      
+      // Get the router address for the current network
+      const chainIdNumber = Number(chainId);
+      const routerAddress = routerAddresses[chainIdNumber as keyof typeof routerAddresses] || routerAddresses[1]; // Fallback to mainnet
+      logDirectSwap(`Using Universal Router address: ${routerAddress}`);
+      
+      // For Base Sepolia, use known Pool Manager address directly
+      if (chainIdNumber === 84532) {
+        poolManagerAddress = "0x05809E1357e13CBC2c38BF2f4DfA106ECf54B69b"; // Base Sepolia v4 Pool Manager
+        logDirectSwap(`Using known Pool Manager address for Base Sepolia: ${poolManagerAddress}`);
+      } else {
+        try {
+          // Connect to Universal Router contract
+          const routerContract = new ethers.Contract(routerAddress, ROUTER_ABI, provider);
+          
+          // Call poolManager() function to get the address
+          logDirectSwap("Calling poolManager() on Universal Router contract...");
+          poolManagerAddress = await routerContract.poolManager();
+          logDirectSwap(`Retrieved Pool Manager address from contract: ${poolManagerAddress}`);
+        } catch (error) {
+          logDirectSwap(`Error getting Pool Manager address: ${error instanceof Error ? error.message : String(error)}`);
+          logDirectSwap("Failed to retrieve Pool Manager address from contract");
+          notification.error("Failed to retrieve Pool Manager address from the router contract");
+          setIsExecuting(false);
+          return;
+        }
+      }
+      
+      if (!poolManagerAddress) {
+        logDirectSwap("Error: Could not determine Pool Manager address");
+        notification.error("Could not determine Pool Manager address");
+        setIsExecuting(false);
+        return;
+      }
+      
+      logDirectSwap(`Using Pool Manager at address: ${poolManagerAddress}`);
+      
+      // Ensure the address is properly checksummed
+      try {
+        // Create Pool Manager contract instance directly without checksumming
+        logDirectSwap(`Using Pool Manager address as-is: ${poolManagerAddress}`);
+        
+        let poolManagerContract;
+        try {
+          poolManagerContract = new ethers.Contract(poolManagerAddress, POOL_MANAGER_ABI, signer);
+        } catch (error) {
+          logDirectSwap(`Error with Pool Manager address: ${error instanceof Error ? error.message : String(error)}`);
+          notification.error(`Invalid Pool Manager address: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          setIsExecuting(false);
+          return;
+        }
+        
+        // Prepare parameters
+        logDirectSwap(`Pool Fee Tier: ${feeTier / 10000}% (${feeTier})`);
+        logDirectSwap(`Token In: ${isTokenInNative ? 'Native ETH' : tokenIn}`);
+        logDirectSwap(`Token Out: ${isTokenOutNative ? 'Native ETH' : tokenOut}`);
+        logDirectSwap(`Amount In: ${amountIn} ${isTokenInNative ? 'ETH' : ''}`);
+        logDirectSwap(`Hook Address: ${hookAddress}`);
+        
+        // Define native token address (WETH)
+        const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+        
+        // Define token addresses for the swap
+        const currency0 = isTokenInNative ? NATIVE_TOKEN : tokenIn;
+        const currency1 = isTokenOutNative ? NATIVE_TOKEN : tokenOut;
+        
+        // Parse amount
+        let parsedAmountIn;
+        try {
+          parsedAmountIn = parseEther(amountIn);
+          logDirectSwap(`Parsed amount: ${parsedAmountIn.toString()} wei`);
+        } catch (error) {
+          logDirectSwap(`Error parsing amount: ${error instanceof Error ? error.message : String(error)}`);
+          notification.error("Invalid amount format");
+          setIsExecuting(false);
+          return;
+        }
+        
+        // Execute the swap in multiple steps
+        logDirectSwap("Executing direct swap...");
+        
+        try {
+          // Step 1: Call settle() with ETH value if using native ETH
+          if (isTokenInNative) {
+            logDirectSwap("Step 1: Calling settle() with ETH value");
+            const settleTx = await poolManagerContract.settle({
+              value: parsedAmountIn
+            });
+            logDirectSwap(`Settle transaction sent with hash: ${settleTx.hash}`);
+            await settleTx.wait();
+            logDirectSwap("Settle transaction confirmed");
+          }
+          
+          // Step 2: Call swap()
+          logDirectSwap("Step 2: Calling swap()");
+          
+          // Define the pool key
+          const poolKey = {
+            currency0: currency0,
+            currency1: currency1,
+            fee: feeTier,
+            tickSpacing: 60, // Default tick spacing for this fee tier
+            hooks: hookAddress
+          };
+          
+          // Define swap parameters
+          const swapParams = {
+            zeroForOne: true, // Assuming trading token0 for token1
+            amountSpecified: parsedAmountIn.toString(),
+            sqrtPriceLimitX96: "0" // No price limit
+          };
+          
+          // Execute the swap
+          const swapTx = await poolManagerContract.swap(
+            poolKey,
+            swapParams,
+            "0x" // Empty hook data
+          );
+          
+          logDirectSwap(`Swap transaction sent with hash: ${swapTx.hash}`);
+          await swapTx.wait();
+          logDirectSwap("Swap transaction confirmed");
+          
+          // Step 3: Call take() to withdraw the output token
+          if (!isTokenOutNative) {
+            logDirectSwap("Step 3: Calling take() to withdraw output token");
+            const takeTx = await poolManagerContract.take(
+              currency1,
+              userAddress,
+              BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") // MaxUint256
+            );
+            
+            logDirectSwap(`Take transaction sent with hash: ${takeTx.hash}`);
+            await takeTx.wait();
+            logDirectSwap("Take transaction confirmed");
+          }
+          
+          notification.success("Direct swap completed successfully!");
+          logDirectSwap("Direct swap completed successfully!");
+        } catch (error: any) {
+          logDirectSwap(`Error executing swap: ${error instanceof Error ? error.message : String(error)}`);
+          
+          // Try to extract revert reason if available
+          if (error.data) {
+            logDirectSwap(`Error data: ${error.data}`);
+          }
+          
+          notification.error(`Failed to execute swap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      } catch (error) {
+        logDirectSwap(`Error with Pool Manager contract: ${error instanceof Error ? error.message : String(error)}`);
+        notification.error(`Failed to execute swap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } catch (error) {
+      logDirectSwap(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      notification.error(`Failed to execute swap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // Simple render function for testing
+  const renderInterface = () => {
+    return (
+      <div className="bg-base-100 shadow-xl rounded-3xl p-6 md:p-8 w-full max-w-2xl mx-auto">
+        <h2 className="text-2xl font-bold text-center mb-6 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">Uniswap Universal Router Interface</h2>
+        
+        {/* Protocol selector */}
+        <div className="mb-6">
+          <h3 className="text-md font-medium text-gray-300 mb-2">Swap Protocol</h3>
+          <div className="flex space-x-4">
+          <button
+              className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                !directSwapMode 
+                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+              onClick={() => setDirectSwapMode(false)}
+            >
+              Universal Router
+            </button>
+            <button
+              className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                directSwapMode 
+                  ? 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+              onClick={() => setDirectSwapMode(true)}
+            >
+              Direct Pool Manager
+          </button>
+        </div>
+          <p className="mt-2 text-xs text-gray-400">
+            {directSwapMode 
+              ? 'Direct swap through Pool Manager - experimental, for advanced users only' 
+              : 'Using Universal Router - the recommended way to swap'}
+          </p>
+          </div>
+        
+        {/* Swap mode selector - only show if using Universal Router */}
+        {!directSwapMode && (
+          <div className="mb-6">
+            <h3 className="text-md font-medium text-gray-300 mb-2">Swap Protocol Version</h3>
+            <div className="flex space-x-4">
+          <button
+                className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                  swapMode === 'v3' 
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setSwapMode('v3')}
+              >
+                Uniswap V3
+          </button>
+          <button
+                className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                  swapMode === 'v4' 
+                    ? 'bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setSwapMode('v4')}
+              >
+                Uniswap V4
+          </button>
+        </div>
+            <p className="mt-2 text-xs text-gray-400">
+              {swapMode === 'v3' 
+                ? 'Using Uniswap V3 pools - available on most networks' 
+                : 'Using Uniswap V4 pools - might not be available on all networks'}
+            </p>
+          </div>
+        )}
+        
+        <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Token In</span>
+            </label>
+          <div className="flex space-x-2">
+              <input
+                type="text"
+                placeholder="Token In Address"
+              className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+                value={tokenIn}
+                onChange={(e) => setTokenIn(e.target.value)}
+                disabled={isTokenInNative}
+              />
+              <button
+                className={`btn rounded-lg shadow-md transition-all duration-200 ${isTokenInNative ? 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              onClick={() => setIsTokenInNative(!isTokenInNative)}
+              >
+                ETH
+              </button>
+            </div>
+          {directSwapMode && !isTokenInNative && (
+            <p className="mt-1 text-xs text-yellow-400">
+              Warning: Direct Pool Manager swaps with ERC20 tokens require additional approval steps.
+            </p>
+          )}
+          </div>
+          
+        <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Token Out</span>
+            </label>
+          <div className="flex space-x-2">
+              <input
+                type="text"
+                placeholder="Token Out Address"
+              className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+                value={tokenOut}
+                onChange={(e) => setTokenOut(e.target.value)}
+                disabled={isTokenOutNative}
+              />
+              <button
+                className={`btn rounded-lg shadow-md transition-all duration-200 ${isTokenOutNative ? 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              onClick={() => setIsTokenOutNative(!isTokenOutNative)}
+              >
+                ETH
+              </button>
+            </div>
+          </div>
+          
+        <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Amount In</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Amount of tokens to swap"
+            className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+              value={amountIn}
+              onChange={(e) => setAmountIn(e.target.value)}
+            />
+          </div>
+          
+        {/* Fee Tier Selector */}
+        <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Fee Tier</span>
+            </label>
+            <select 
+            className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+              value={feeTier}
+              onChange={(e) => setFeeTier(Number(e.target.value))}
+            >
+            <option value="500">0.05%</option>
+            <option value="3000">0.3%</option>
+            <option value="10000">1%</option>
+            </select>
+          </div>
+          
+        {/* Hook Address Input - only show for Direct Pool Manager */}
+        {directSwapMode && (
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Hook Address (Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="0x0000000000000000000000000000000000000000"
+              className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+              value={hookAddress}
+              onChange={(e) => setHookAddress(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              Leave as zero address for no hooks. Custom hooks require special handling.
+            </p>
+          </div>
+        )}
+        
+        {/* Deadline Input - only show for Universal Router */}
+        {!directSwapMode && (
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text text-sm font-medium text-gray-300">Deadline (minutes)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Deadline in minutes"
+              className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+            />
+          </div>
+        )}
+          
+          {/* Action Buttons */}
+        <div className="flex flex-col md:flex-row gap-4 mt-6">
+          {!directSwapMode ? (
+            // Universal Router buttons
+            <>
+            <button
+                className="py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium text-sm"
+            >
+              Generate Commands
+            </button>
+            <button
+                className="py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-medium text-sm"
+                disabled={isExecuting}
+            >
+              {isExecuting ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                    Processing...
+                </span>
+                ) : "Execute Swap"}
+              </button>
+            </>
+          ) : (
+            // Direct Swap button for Pool Manager
+            <button
+              className="py-2 px-4 rounded-lg shadow-md transition-all duration-200 w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-medium text-sm"
+              disabled={isExecuting}
+              onClick={executeDirectSwap}
+            >
+              {isExecuting ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </span>
+              ) : "Execute Direct Swap"}
+            </button>
+          )}
+        </div>
+        
+        {/* Display Generated Commands - only show for Universal Router */}
+        {!directSwapMode && commandsHex && (
+          <div className="mt-4 p-4 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+            <h3 className="text-md font-medium text-gray-300 mb-2">Generated Command Hex</h3>
+            <div className="bg-gray-900/80 rounded-md p-2 overflow-x-auto text-xs text-gray-300 font-mono">
+              {commandsHex}
+            </div>
+            
+            {/* Raw Input Data */}
+            <h3 className="text-md font-medium text-gray-300 mt-4 mb-2">Raw Input Data</h3>
+                <div className="bg-gray-900/80 rounded-md p-2 overflow-x-auto text-xs text-gray-300 font-mono">
+                  {inputsArray.map((input, index) => (
+                <div key={index} className="mb-1 break-all">
+                  <span className="text-blue-400 mr-2">Input {index}:</span> {input}
+                    </div>
+                  ))}
+                </div>
+          </div>
+        )}
+        
+        {/* Add logs display section for direct swap mode after the commands display */}
+        {directSwapMode && directSwapLogs.length > 0 && (
+          <div className="mt-4 p-4 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+            <h3 className="text-md font-medium text-gray-300 mb-2">Direct Swap Logs</h3>
+            <div className="bg-gray-900/80 rounded-md p-2 overflow-y-auto max-h-48 text-xs text-gray-300 font-mono">
+              {directSwapLogs.map((log, index) => (
+                <div key={index} className="mb-1">
+                  <span className="text-blue-400">{log}</span>
+            </div>
+              ))}
+          </div>
+                  </div>
+                )}
+      </div>
+    );
+  };
+
+  // Main component render
+  return (
+    <div className="py-8 px-4 sm:px-0">
+      {renderInterface()}
+    </div>
+  );
+} 

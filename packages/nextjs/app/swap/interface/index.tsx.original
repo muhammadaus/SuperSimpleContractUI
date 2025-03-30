@@ -1,0 +1,1601 @@
+"use client";
+
+import React, { useEffect, useState } from 'react';
+import { Address, parseEther, parseUnits, formatUnits } from 'viem';
+import * as viemChains from 'viem/chains';
+import { useTargetNetwork } from '@/hooks/scaffold-eth/useTargetNetwork';
+import { useContractStore } from "@/utils/scaffold-eth/contract";
+import { notification } from "@/utils/scaffold-eth/notification";
+import { 
+  useAppKit, 
+  useAppKitAccount, 
+  useAppKitProvider, 
+  useAppKitNetwork,
+  useDisconnect,
+  createAppKit
+} from '@reown/appkit/react';
+import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import { BrowserProvider } from 'ethers';
+import { useScaffoldContract } from '@/hooks/scaffold-eth';
+import type { AppKitNetwork } from '@reown/appkit/networks';
+import { ethers } from 'ethers';
+
+// Universal Router ABI fragment for the execute function
+const ROUTER_ABI = [
+  "function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable",
+  "function execute(bytes calldata commands, bytes[] calldata inputs) external payable",
+  "function collectRewards(bytes looksRareClaim) external",
+  "function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external",
+  "function supportsInterface(bytes4 interfaceId) external pure returns (bool)",
+  "function poolManager() external view returns (address)"
+];
+
+// PoolManager ABI fragment for direct interaction
+const POOL_MANAGER_ABI = [
+  "function swap(tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, tuple(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, bytes hookData) external returns (int256)",
+  "function settle() external payable returns (uint256)",
+  "function take(address currency, address to, uint256 amount) external"
+];
+
+// Define the specific function signature for execute with deadline to avoid ambiguity
+const EXECUTE_WITH_DEADLINE_SIG = "execute(bytes,bytes[],uint256)";
+
+// Initialize AppKit at module level if not already initialized
+if (typeof window !== 'undefined' && !(window as any).__APPKIT_INITIALIZED__) {
+  try {
+    console.log('Initializing AppKit in swap interface...');
+    // Project metadata
+    const metadata = {
+      name: 'WrapTX Swap',
+      description: 'Swap tokens using Universal Router',
+      url: 'https://reown.net',
+      icons: ['https://reown.net/images/logo.png'],
+    };
+    
+    // WalletConnect project ID (get from environment or use placeholder)
+    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
+    
+    // Create ethers adapter
+    const ethersAdapter = new EthersAdapter();
+    
+    // Generate AppKit networks from all available viem chains
+    const viemChainsArray = Object.values(viemChains).filter(
+      (chain): chain is typeof viemChains.mainnet => 
+        typeof chain === 'object' && 
+        chain !== null && 
+        'id' in chain && 
+        typeof chain.id === 'number'
+    );
+    
+    // Convert viem chains to AppKit networks
+    const appKitNetworks: AppKitNetwork[] = viemChainsArray.map(chain => ({
+      id: chain.id,
+      name: chain.name || `Chain ${chain.id}`,
+      rpcUrls: {
+        default: {
+          http: chain.rpcUrls?.default?.http || [`https://rpc.ankr.com/${chain.id}`]
+        }
+      },
+      nativeCurrency: {
+        name: chain.nativeCurrency?.name || 'Ether',
+        symbol: chain.nativeCurrency?.symbol || 'ETH',
+        decimals: chain.nativeCurrency?.decimals || 18,
+      },
+      blockExplorers: chain.blockExplorers?.default 
+        ? {
+            default: {
+              url: chain.blockExplorers.default.url,
+              name: chain.blockExplorers.default.name || 'Explorer'
+            }
+          }
+        : {
+            default: {
+              url: `https://etherscan.io`,
+              name: 'Explorer'
+            }
+          }
+    }));
+    
+    // Ensure we have at least mainnet as the first item
+    const mainnetNetwork = appKitNetworks.find(n => n.id === 1);
+    if (mainnetNetwork) {
+      // Move mainnet to the beginning of the array
+      const filteredNetworks = appKitNetworks.filter(n => n.id !== 1);
+      const networks = [mainnetNetwork, ...filteredNetworks] as [AppKitNetwork, ...AppKitNetwork[]];
+      
+      console.log(`Initializing AppKit with ${networks.length} networks`);
+      console.log('Networks included:', networks.map(n => `${n.name} (${n.id})`).slice(0, 5), '...');
+      
+      createAppKit({
+        adapters: [ethersAdapter],
+        networks,
+        metadata,
+        projectId,
+        themeMode: 'dark',
+        features: {
+          analytics: true,
+        },
+        themeVariables: {
+          // Theme customization if needed
+        },
+      });
+    } else {
+      throw new Error("Mainnet network not found in viem chains");
+    }
+    
+    // Mark as initialized
+    (window as any).__APPKIT_INITIALIZED__ = true;
+    console.log('AppKit initialized in swap interface');
+  } catch (error) {
+    console.error('Error initializing AppKit:', error);
+  }
+}
+
+// Add a new function to validate the Universal Router contract
+async function validateUniversalRouter(contractAddress: string, provider: ethers.Provider): Promise<boolean> {
+  try {
+    console.log("Validating Universal Router contract at:", contractAddress);
+    
+    // 1. Check if contract exists by getting the bytecode
+    const bytecode = await provider.getCode(contractAddress);
+    if (bytecode === '0x') {
+      console.error("No bytecode at address - this is not a contract");
+      return false;
+    }
+    
+    console.log(`Contract bytecode size: ${(bytecode.length - 2) / 2} bytes`);
+    
+    // 2. Check for Universal Router function signatures in bytecode
+    const executeSignature = "0x3593564c"; // execute(bytes,bytes[],uint256)
+    const executeWithoutDeadlineSignature = "0x47ccca02"; // execute(bytes,bytes[])
+    const supportsInterfaceSignature = "0x01ffc9a7"; // supportsInterface(bytes4)
+    const uniswapV3CallbackSignature = "0xfa461e33"; // uniswapV3SwapCallback(int256,int256,bytes)
+    
+    let isUniversalRouter = false;
+    
+    // Check for execute function signature with deadline
+    if (bytecode.indexOf(executeSignature.slice(2)) > 0) {
+      console.log("✓ Contract contains Universal Router execute(bytes,bytes[],uint256) function");
+      isUniversalRouter = true;
+    }
+    
+    // Check for execute function signature without deadline
+    if (bytecode.indexOf(executeWithoutDeadlineSignature.slice(2)) > 0) {
+      console.log("✓ Contract contains Universal Router execute(bytes,bytes[]) function");
+      isUniversalRouter = true;
+    }
+    
+    // Check for other Universal Router functions
+    if (bytecode.indexOf(supportsInterfaceSignature.slice(2)) > 0) {
+      console.log("✓ Contract contains supportsInterface function");
+    }
+    
+    if (bytecode.indexOf(uniswapV3CallbackSignature.slice(2)) > 0) {
+      console.log("✓ Contract contains uniswapV3SwapCallback function");
+    }
+    
+    if (!isUniversalRouter) {
+      console.error("❌ Contract does not appear to be a Universal Router - required functions not found");
+      return false;
+    }
+    
+    // 3. Create contract instance and make a read call to verify interface 
+    const routerContract = new ethers.Contract(contractAddress, ROUTER_ABI, provider);
+    
+    try {
+      // Try calling supportsInterface with ERC-165 interface ID
+      const supportsERC165 = await routerContract.supportsInterface("0x01ffc9a7");
+      console.log("supportsInterface check result:", supportsERC165);
+      
+      // Try calling supportsInterface with ERC-721 receiver interface ID
+      const supportsERC721Receiver = await routerContract.supportsInterface("0x150b7a02");
+      console.log("Supports ERC721 receiver:", supportsERC721Receiver);
+      
+      console.log("✅ Successfully read from Universal Router contract");
+      return true;
+    } catch (readError) {
+      console.warn("Warning: Could not read from contract:", readError);
+      // Still return true if we've verified the bytecode, even if read calls fail
+      return isUniversalRouter;
+    }
+  } catch (error) {
+    console.error("Error validating Universal Router:", error);
+    return false;
+  }
+}
+
+export default function SwapInterface() {
+  const [tokenIn, setTokenIn] = useState<string>('');
+  const [tokenOut, setTokenOut] = useState<string>('');
+  const [amountIn, setAmountIn] = useState<string>('');
+  const [amountOut, setAmountOut] = useState<string>('');
+  const [deadline, setDeadline] = useState<string>('30'); // Default 30 minutes
+  const [commandsHex, setCommandsHex] = useState<string>('');
+  const [inputsArray, setInputsArray] = useState<string[]>([]);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [contractName, setContractName] = useState<string | null>(null);
+  const [contractAddress, setContractAddress] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>("");
+  const [isTokenInNative, setIsTokenInNative] = useState<boolean>(false);
+  const [isTokenOutNative, setIsTokenOutNative] = useState<boolean>(false);
+  const [isLoadingContract, setIsLoadingContract] = useState(true);
+  const [feeTier, setFeeTier] = useState<number>(3000); // Default to 0.3%
+  const [swapMode, setSwapMode] = useState<'v3' | 'v4'>('v3'); // Default to V3
+  const [decodedParameters, setDecodedParameters] = useState<any>(null); // Store decoded parameters
+  const [poolManagerAddress, setPoolManagerAddress] = useState<string | null>(null);
+  const [directSwapMode, setDirectSwapMode] = useState<boolean>(false);
+  
+  // Constants
+  const NATIVE_ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+  const USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // Mainnet USDC
+  const WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"; // Mainnet WETH
+  
+  // Get user address from AppKit
+  const { targetNetwork } = useTargetNetwork();
+  const { isConnected, address: userAddress } = useAppKitAccount();
+  const { open: openAppKit } = useAppKit();
+  const { walletProvider } = useAppKitProvider<any>('eip155');
+  const { chainId: currentChainId, switchNetwork } = useAppKitNetwork();
+  const { disconnect } = useDisconnect();
+  
+  // Get contract for interaction
+  const { data: contract, isLoading: isContractLoading } = useScaffoldContract({
+    contractName: contractName || 'YourContract',
+  });
+  
+  // Helper function to properly format addresses with 0x prefix
+  const formatAddress = (address: string) => {
+    if (!address) return '';
+    if (address.startsWith('0x')) {
+      return address; // Address already has 0x prefix
+    }
+    return `0x${address}`; // Add prefix if missing
+  };
+
+  // Check for Router or PoolManager or YourContract
+  const contracts = useContractStore.getState().contracts;
+  
+  useEffect(() => {
+    const currentNetwork = targetNetwork.id;
+    const networkContracts = contracts[currentNetwork];
+    
+    // Debug logging
+    console.log("Current network ID:", currentNetwork);
+    console.log("Available contracts for network:", networkContracts);
+    
+    if (networkContracts) {
+      // First check for UniversalRouter
+      if (networkContracts.UniversalRouter) {
+        console.log("UniversalRouter found:", networkContracts.UniversalRouter.address);
+        setContractName('UniversalRouter');
+        setContractAddress(networkContracts.UniversalRouter.address);
+        setDebugInfo(JSON.stringify({ 
+          contractType: 'UniversalRouter', 
+          address: networkContracts.UniversalRouter.address,
+          network: targetNetwork.name,
+          networkId: currentNetwork
+        }, null, 2));
+      }
+      // Then check if PoolManager exists
+      else if (networkContracts.PoolManager) {
+        console.log("PoolManager found:", networkContracts.PoolManager.address);
+        setContractName('PoolManager');
+        setContractAddress(networkContracts.PoolManager.address);
+        setDebugInfo(JSON.stringify({ 
+          contractType: 'PoolManager', 
+          address: networkContracts.PoolManager.address,
+          network: targetNetwork.name,
+          networkId: currentNetwork
+        }, null, 2));
+      } 
+      // Otherwise fallback to YourContract
+      else if (networkContracts.YourContract) {
+        console.log("YourContract found:", networkContracts.YourContract.address);
+        setContractName('YourContract');
+        setContractAddress(networkContracts.YourContract.address);
+        setDebugInfo(JSON.stringify({ 
+          contractType: 'YourContract', 
+          address: networkContracts.YourContract.address,
+          network: targetNetwork.name,
+          networkId: currentNetwork
+        }, null, 2));
+      } else {
+        console.log("No known contracts found for network", currentNetwork);
+        setDebugInfo(JSON.stringify({ 
+          error: 'No contracts found',
+          network: targetNetwork.name,
+          networkId: currentNetwork,
+          availableContracts: Object.keys(networkContracts)
+        }, null, 2));
+      }
+    } else {
+      console.log("No contracts available for network", currentNetwork);
+      setDebugInfo(JSON.stringify({ 
+        error: 'No network contracts',
+        network: targetNetwork.name,
+        networkId: currentNetwork,
+        availableNetworks: Object.keys(contracts)
+      }, null, 2));
+    }
+    
+    setIsLoadingContract(false);
+  }, [contracts, targetNetwork]);
+
+  // Clear any stale connection flags on component mount and when connection status changes
+  useEffect(() => {
+    // Check for stale connection flags
+    if (typeof window !== 'undefined') {
+      const connectionInProgress = window.sessionStorage.getItem('walletConnectionInProgress');
+      const connectionTimestamp = window.sessionStorage.getItem('walletConnectionTimestamp');
+      
+      // If connection was initiated more than 2 minutes ago or user is now connected, clear the flag
+      if (connectionInProgress) {
+        const now = Date.now();
+        const timestamp = connectionTimestamp ? parseInt(connectionTimestamp, 10) : 0;
+        
+        if (isConnected || now - timestamp > 120000 || !connectionTimestamp) {
+          window.sessionStorage.removeItem('walletConnectionInProgress');
+          window.sessionStorage.removeItem('walletConnectionTimestamp');
+        }
+      }
+    }
+    
+    // If user is connected, ensure connection flags are cleared
+    if (isConnected && typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('walletConnectionInProgress');
+      window.sessionStorage.removeItem('walletConnectionTimestamp');
+    }
+  }, [isConnected]);
+
+  // Define fee tier options
+  const feeTierOptions = [
+    { value: 100, label: "0.01%" },
+    { value: 500, label: "0.05%" },
+    { value: 3000, label: "0.3%" },
+    { value: 10000, label: "1%" }
+  ];
+  
+  // Standard tick spacings that match the fee tiers
+  const getTickSpacing = (fee: number): number => {
+    switch (fee) {
+      case 100: return 1;
+      case 500: return 10;
+      case 3000: return 60;
+      case 10000: return 200;
+      default: return 60; // Default to 0.3% tier's tick spacing
+    }
+  };
+
+  // Helper to generate command bytes
+  const generateRouterCommands = () => {
+    if (swapMode === 'v3') {
+      generateV3RouterCommands();
+    } else {
+      // Use V4 command generation logic
+      generateV4RouterCommands();
+    }
+  };
+
+  // Function to generate V4 router commands
+  const generateV4RouterCommands = () => {
+    try {
+      // Create deadline timestamp (current time + deadline minutes)
+      const deadlineTimestamp = Math.floor(Date.now() / 1000) + parseInt(deadline) * 60;
+      
+      // Format the input and output token addresses, using the native address where appropriate
+      const formattedTokenIn = isTokenInNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenIn);
+      const formattedTokenOut = isTokenOutNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenOut);
+      
+      console.log("Formatted addresses:", {
+        tokenIn: formattedTokenIn,
+        tokenOut: formattedTokenOut
+      });
+      
+      // Parse and format amount in
+      const parsedAmountIn = parseUnits(amountIn, 18);
+      
+      // The command for V4_SWAP is 0x0f
+      const v4CommandByte = ethers.hexlify(new Uint8Array([0x0f])); // V4_SWAP command
+      setCommandsHex(v4CommandByte);
+      
+      // For V4 Router, we need to encode the actions and parameters
+      // Actions.SWAP_EXACT_IN_SINGLE = 0x06, Actions.SETTLE_ALL = 0x0c, Actions.TAKE_ALL = 0x0f
+      const actionBytes = new Uint8Array([0x06, 0x0c, 0x0f]);
+      const encodedActions = ethers.hexlify(actionBytes);
+      
+      // Sort token addresses (lower address is currency0) for V4 PoolKey
+      // Must use toLowerCase() for proper string comparison
+      const [token0, token1] = [formattedTokenIn, formattedTokenOut].sort((a, b) => 
+        a.toLowerCase() < b.toLowerCase() ? -1 : 1
+      );
+      
+      // We need to determine if we're swapping from token0 to token1 or vice versa
+      const zeroForOne = formattedTokenIn.toLowerCase() === token0.toLowerCase();
+      
+      // Log for debugging swap direction
+      console.log("Swap direction:", {
+        formattedTokenIn,
+        formattedTokenOut,
+        token0,
+        token1,
+        zeroForOne,
+        feeTier
+      });
+      
+      // Get tick spacing based on selected fee tier
+      const tickSpacing = getTickSpacing(feeTier);
+      
+      // Create the V4 poolKey structure
+      const poolKey = {
+        currency0: token0,
+        currency1: token1,
+        fee: feeTier, // Use selected fee tier
+        tickSpacing: tickSpacing, // Use matching tick spacing
+        hooks: "0x0000000000000000000000000000000000000000" // No hooks
+      };
+      
+      // Initialize ABI coder for encoding parameters
+      const abiCoder = new ethers.AbiCoder();
+      
+      // Prepare parameters for each V4 action
+      const v4Params = new Array(3);
+      
+      // First parameter: ExactInputSingleParams struct
+      // Important: use uint128 for amountIn and amountOutMinimum, not uint256!
+      v4Params[0] = abiCoder.encode(
+        ['tuple(tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, uint160 sqrtPriceLimitX96, bytes hookData)'],
+        [{
+          poolKey,
+          zeroForOne: zeroForOne,
+          amountIn: parsedAmountIn,
+          amountOutMinimum: BigInt(0), // No minimum for demo
+          sqrtPriceLimitX96: BigInt(0), // No price limit
+          hookData: "0x" // Empty hook data
+        }]
+      );
+      
+      // Second parameter: specify input tokens for the swap (SETTLE_ALL)
+      // For SETTLE_ALL, we need to encode the input currency and amount
+      // Important: use uint128 for amount, not uint256!
+      v4Params[1] = abiCoder.encode(['address', 'uint128'], [formattedTokenIn, parsedAmountIn]);
+      
+      // Third parameter: specify output tokens from the swap (TAKE_ALL)
+      // For TAKE_ALL, we need to encode the output currency and minimum amount
+      // Important: use uint128 for amount, not uint256!
+      v4Params[2] = abiCoder.encode(['address', 'uint128'], [formattedTokenOut, BigInt(0)]);
+      
+      // Encode the V4 router input - this is what goes into the inputs array
+      const v4Input = abiCoder.encode(['bytes', 'bytes[]'], [encodedActions, v4Params]);
+      
+      // This is the final inputs array for the Universal Router execute function
+      const inputsArray = [v4Input];
+      setInputsArray(inputsArray);
+      
+      // Store detailed parameters for display
+      const decodedParams = {
+        commandType: 'V4_SWAP (0x0f)',
+        deadline: new Date(deadlineTimestamp * 1000).toLocaleString(),
+        actions: [
+          { name: 'SWAP_EXACT_IN_SINGLE', value: '0x06' },
+          { name: 'SETTLE_ALL', value: '0x0c' },
+          { name: 'TAKE_ALL', value: '0x0f' }
+        ],
+        poolKey: {
+          currency0: token0,
+          currency1: token1,
+          fee: `${feeTier/10000}% (${feeTier})`,
+          tickSpacing,
+          hooks: '0x0000000000000000000000000000000000000000'
+        },
+        swapParams: {
+          zeroForOne,
+          amountIn: formatUnits(parsedAmountIn, 18),
+          amountOutMinimum: '0',
+          sqrtPriceLimitX96: '0',
+        },
+        settle: {
+          token: formattedTokenIn,
+          amount: formatUnits(parsedAmountIn, 18)
+        },
+        take: {
+          token: formattedTokenOut,
+          minimumAmount: '0'
+        }
+      };
+      
+      // Store the decoded parameters in component state for rendering
+      setDecodedParameters(decodedParams);
+      
+      notification.success("V4 commands generated successfully");
+      console.log("Generated V4 router commands:", {
+        command: v4CommandByte,
+        actions: encodedActions,
+        poolKey,
+        zeroForOne,
+        inputsArray,
+        deadline: deadlineTimestamp
+      });
+    } catch (error) {
+      console.error("Error generating V4 commands:", error);
+      notification.error("Failed to generate V4 commands");
+    }
+  };
+
+  const generateV3RouterCommands = () => {
+    try {
+      console.log("==== GENERATING V3 ROUTER COMMANDS ====");
+      // Create deadline timestamp
+      const deadlineTimestamp = Math.floor(Date.now() / 1000) + parseInt(deadline) * 60;
+      
+      // Format addresses
+      const formattedTokenIn = isTokenInNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenIn);
+      const formattedTokenOut = isTokenOutNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenOut);
+      
+      console.log("Formatted addresses:", {
+        tokenIn: formattedTokenIn,
+        tokenOut: formattedTokenOut
+      });
+      
+      // Parse amount
+      const parsedAmountIn = parseUnits(amountIn, 18);
+      
+      // The command for V3_SWAP_EXACT_IN is 0x08
+      const v3CommandByte = ethers.hexlify(new Uint8Array([0x08])); // V3_SWAP_EXACT_IN command
+      setCommandsHex(v3CommandByte);
+      
+      // For V3, we encode the path differently
+      // Create fee bytes for 0.3% fee (3000)
+      const feeHex = feeTier.toString(16).padStart(6, '0');
+      console.log("Fee hex:", feeHex);
+      
+      // Create path - For V3, we concatenate addresses with fee
+      let path;
+      let pathDescription;
+      
+      if (isTokenInNative) {
+        // For ETH -> Token, we use WETH in the path
+        path = ethers.concat([
+          ethers.getBytes(WETH_ADDRESS),
+          ethers.getBytes(`0x${feeHex.padStart(6, '0')}`),
+          ethers.getBytes(formattedTokenOut)
+        ]);
+        pathDescription = `WETH -> ${feeTier/10000}% fee -> ${formattedTokenOut}`;
+      } else if (isTokenOutNative) {
+        // For Token -> ETH, we use WETH in the path
+        path = ethers.concat([
+          ethers.getBytes(formattedTokenIn),
+          ethers.getBytes(`0x${feeHex.padStart(6, '0')}`),
+          ethers.getBytes(WETH_ADDRESS)
+        ]);
+        pathDescription = `${formattedTokenIn} -> ${feeTier/10000}% fee -> WETH`;
+      } else {
+        // Token -> Token
+        path = ethers.concat([
+          ethers.getBytes(formattedTokenIn),
+          ethers.getBytes(`0x${feeHex.padStart(6, '0')}`),
+          ethers.getBytes(formattedTokenOut)
+        ]);
+        pathDescription = `${formattedTokenIn} -> ${feeTier/10000}% fee -> ${formattedTokenOut}`;
+      }
+      
+      console.log("V3 Path description:", pathDescription);
+      console.log("V3 Path bytes:", ethers.hexlify(path));
+      
+      // Initialize ABI coder
+      const abiCoder = new ethers.AbiCoder();
+      
+      // Create V3 input parameter
+      const recipient = userAddress || '0x0000000000000000000000000000000000000001'; // Use placeholder if not connected
+      console.log("Recipient for V3 swap:", recipient);
+      
+      // V3_SWAP_EXACT_IN on Universal Router has these parameters:
+      // bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint256 deadline
+      const v3Params = abiCoder.encode(
+        ['bytes', 'address', 'uint256', 'uint256', 'uint256'],
+        [
+          path,
+          recipient,
+          parsedAmountIn,
+          BigInt(0), // amountOutMinimum - no minimum for demo
+          BigInt(deadlineTimestamp) // v3 includes deadline in the params
+        ]
+      );
+      
+      // Log the encoded parameters for debugging
+      console.log("V3 params encoded:", {
+        path: ethers.hexlify(path),
+        recipient,
+        amountIn: parsedAmountIn.toString(),
+        amountOutMinimum: "0",
+        deadline: BigInt(deadlineTimestamp).toString()
+      });
+      
+      // This is the final inputs array for the Universal Router execute function
+      const inputsArray = [v3Params];
+      setInputsArray(inputsArray);
+      
+      // Store detailed parameters for display
+      const decodedParams = {
+        commandType: 'V3_SWAP_EXACT_IN (0x08)',
+        deadline: new Date(deadlineTimestamp * 1000).toLocaleString(),
+        path: pathDescription,
+        recipient: recipient,
+        amountIn: formatUnits(parsedAmountIn, 18),
+        amountOutMinimum: '0',
+        executionDeadline: deadlineTimestamp.toString()
+      };
+      
+      // Store the decoded parameters in component state for rendering
+      setDecodedParameters(decodedParams);
+      
+      notification.success("V3 commands generated successfully");
+      console.log("Generated V3 router commands:", {
+        command: v3CommandByte,
+        path: ethers.hexlify(path),
+        inputsArray,
+        deadline: deadlineTimestamp
+      });
+    } catch (error) {
+      console.error("Error generating V3 commands:", error);
+      notification.error("Failed to generate V3 commands");
+    }
+  };
+
+  // Fetch the PoolManager address from the UniversalRouter contract
+  const fetchPoolManagerAddress = async () => {
+    if (!contractAddress || !walletProvider) return;
+    
+    try {
+      const provider = new ethers.BrowserProvider(walletProvider);
+      const routerContract = new ethers.Contract(contractAddress, ROUTER_ABI, provider);
+      
+      const poolManager = await routerContract.poolManager();
+      console.log("PoolManager address:", poolManager);
+      setPoolManagerAddress(poolManager);
+    } catch (error) {
+      console.error("Error fetching PoolManager address:", error);
+    }
+  };
+  
+  // Call fetchPoolManagerAddress when the contract address is available
+  useEffect(() => {
+    if (contractAddress && walletProvider) {
+      fetchPoolManagerAddress();
+    }
+  }, [contractAddress, walletProvider]);
+
+  // Handle executing the swap
+  const handleExecuteSwap = async () => {
+    // Input validation
+    if (!commandsHex || !contractAddress) {
+      notification.error("Missing swap parameters");
+      return;
+    }
+    
+    // Check if wallet is connected, if not prompt to connect
+    if (!isConnected || !userAddress) {
+      notification.info("Please connect your wallet first");
+      try {
+        // Open AppKit to connect wallet
+        openAppKit();
+        return;
+      } catch (error) {
+        console.error("Error opening wallet:", error);
+        notification.error("Could not open wallet connection");
+        return;
+      }
+    }
+    
+    // Check if a transaction is already in progress
+    if (isExecuting) {
+      notification.info("Please wait for the current operation to complete");
+      return;
+    }
+    
+    setIsExecuting(true);
+    
+    try {
+      // Parse input amount
+      let parsedAmountIn = ethers.parseEther("0");
+      if (amountIn) {
+        try {
+          parsedAmountIn = ethers.parseEther(amountIn);
+          console.log(`Parsed amount: ${parsedAmountIn} wei from ${amountIn} ETH`);
+        } catch (parseError) {
+          console.error("Error parsing amount:", parseError);
+          notification.error("Invalid amount format");
+          setIsExecuting(false);
+          return;
+        }
+      }
+      
+      // Check if we need to switch networks
+      if (currentChainId !== targetNetwork.id) {
+        notification.info(`Switching to ${targetNetwork.name} network...`);
+        try {
+          // Direct wallet provider call to switch chains
+          if (walletProvider && walletProvider.request) {
+            try {
+              await walletProvider.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: `0x${targetNetwork.id.toString(16)}` }],
+              });
+              notification.success(`Switched to ${targetNetwork.name}!`);
+            } catch (switchError) {
+              console.error("Error switching chain:", switchError);
+              notification.error(`Could not switch to ${targetNetwork.name}`);
+              setIsExecuting(false);
+              return;
+            }
+          } else {
+            throw new Error("Wallet provider not available or doesn't support network switching");
+          }
+        } catch (switchError) {
+          console.error("Failed to switch network:", switchError);
+          notification.error(`Failed to switch network: ${(switchError instanceof Error ? switchError.message : 'Unknown error')}`);
+          setIsExecuting(false);
+          return;
+        }
+      }
+      
+      // Create ethers provider and signer
+      if (!walletProvider) {
+        notification.error("Wallet provider not available");
+        setIsExecuting(false);
+        return;
+      }
+      
+      const provider = new ethers.BrowserProvider(walletProvider);
+      const signer = await provider.getSigner();
+      
+      // Use explicitly selected swap mode
+      const isV3Swap = swapMode === 'v3';
+      const isV4Swap = swapMode === 'v4';
+      console.log(`Swap Type: ${isV4Swap ? 'V4 Swap' : isV3Swap ? 'V3 Swap' : 'Unknown'}`);
+      
+      // Validate contract
+      const bytecode = await provider.getCode(contractAddress);
+      if (bytecode === '0x') {
+        console.log("Warning: No bytecode at address - this might not be a contract");
+        notification.error("No contract found at address");
+        setIsExecuting(false);
+        return;
+      }
+      
+      // Prepare command bytes - ensure no double 0x prefix
+      const commandBytes = commandsHex.startsWith('0x') ? commandsHex : `0x${commandsHex}`;
+      
+      // Log detailed command and input data for debugging
+      console.log("Command bytes used:", commandBytes);
+      console.log("Input array:", inputsArray);
+      
+      // Prepare deadline timestamp
+      const deadlineTimestamp = deadline 
+        ? BigInt(Math.floor(Date.now() / 1000) + Number(deadline) * 60) 
+        : BigInt(Math.floor(Date.now() / 1000) + 600);
+
+      console.log("Deadline timestamp:", deadlineTimestamp.toString());
+      
+      // For improved debugging, display the final transaction data as it will be encoded
+      console.log("Transaction parameters:", {
+        commands: commandBytes,
+        inputs: inputsArray,
+        deadline: deadlineTimestamp.toString(),
+        value: isTokenInNative ? parsedAmountIn.toString() : "0"
+      });
+      
+      // Create a low-level transaction with manual encoding to avoid function signature issues
+      const abiCoder = new ethers.AbiCoder();
+      const functionSelector = "0x3593564c"; // execute(bytes,bytes[],uint256)
+      
+      // Encode the parameters
+      const encodedParams = abiCoder.encode(
+        ["bytes", "bytes[]", "uint256"],
+        [commandBytes, inputsArray, deadlineTimestamp]
+      );
+      
+      // Combine the function selector with the encoded parameters
+      const txData = functionSelector + encodedParams.slice(2); // Remove the '0x' prefix from encoded parameters
+      
+      // Prepare transaction object
+      const txParams = {
+        to: contractAddress,
+        data: txData,
+        value: isTokenInNative ? parsedAmountIn : BigInt(0),
+        gasLimit: isV4Swap ? 1000000 : 500000 // Set a higher gas limit for V4 swaps
+      };
+      
+      console.log("Final transaction data:", {
+        to: txParams.to,
+        data: txParams.data.slice(0, 100) + "...", // Truncate for readability
+        value: txParams.value.toString(),
+        gasLimit: txParams.gasLimit.toString()
+      });
+      
+      notification.info("Sending transaction to wallet. Please check your wallet to approve it.");
+      
+      try {
+        // Send the transaction
+        const tx = await signer.sendTransaction(txParams);
+        console.log("✅ Transaction sent:", tx.hash);
+        notification.success(`Transaction sent! Hash: ${tx.hash}`);
+        
+        // Wait for confirmation
+        notification.info("Waiting for confirmation...");
+        const receipt = await tx.wait();
+        if (receipt) {
+          console.log("Transaction confirmed in block:", receipt.blockNumber);
+          notification.success(`Swap executed successfully in block ${receipt.blockNumber}!`);
+        }
+      } catch (txError) {
+        console.error("❌ Transaction error:", txError);
+        
+        // Analyze error for helpful messages
+        const errorMsg = txError instanceof Error ? txError.message : String(txError);
+        console.log("Error details:", errorMsg);
+        
+        if (errorMsg.includes("user rejected") || errorMsg.includes("User denied")) {
+          notification.info("Transaction was rejected in the wallet");
+        } else if (errorMsg.includes("insufficient funds")) {
+          notification.error("Insufficient funds for this transaction");
+        } else if (errorMsg.includes("execution reverted")) {
+          notification.error("Transaction would fail on-chain: " + errorMsg.substring(0, 100));
+        } else if (errorMsg.includes("missing revert data") || errorMsg.includes("CALL_EXCEPTION")) {
+          if (isV4Swap) {
+            notification.error("V4 swap failed. The V4 pool likely doesn't exist for this token pair on this network.");
+            console.log("V4 pools are limited on many networks. Try using V3 instead.");
+          } else {
+            notification.error("Transaction would fail. There may be an issue with the token pair or liquidity.");
+          }
+        } else {
+          notification.error(`Transaction failed: ${errorMsg.substring(0, 100)}`);
+        }
+        
+        // Try an alternative method with execute(bytes,bytes[]) if appropriate
+        if ((errorMsg.includes("missing revert data") || errorMsg.includes("CALL_EXCEPTION")) && 
+            !errorMsg.includes("user rejected") && !errorMsg.includes("User denied")) {
+          try {
+            console.log("Trying alternative execution method without deadline...");
+            notification.info("Retrying with alternative method...");
+            
+            // Create a new function selector for execute(bytes,bytes[])
+            const alternativeFunctionSelector = "0x47ccca02"; // execute(bytes,bytes[])
+            
+            // Encode the parameters without deadline
+            const altEncodedParams = abiCoder.encode(
+              ["bytes", "bytes[]"],
+              [commandBytes, inputsArray]
+            );
+            
+            // Create new transaction data
+            const altTxData = alternativeFunctionSelector + altEncodedParams.slice(2);
+            
+            // Send the alternative transaction
+            const altTx = await signer.sendTransaction({
+              to: contractAddress,
+              data: altTxData,
+              value: isTokenInNative ? parsedAmountIn : BigInt(0),
+              gasLimit: isV4Swap ? 1000000 : 500000
+            });
+            
+            console.log("✅ Alternative transaction sent:", altTx.hash);
+            notification.success(`Alternative transaction sent! Hash: ${altTx.hash}`);
+            
+            // Wait for confirmation
+            notification.info("Waiting for confirmation...");
+            const altReceipt = await altTx.wait();
+            if (altReceipt) {
+              console.log("Alternative transaction confirmed in block:", altReceipt.blockNumber);
+              notification.success(`Swap executed successfully in block ${altReceipt.blockNumber}!`);
+            }
+          } catch (altError) {
+            console.error("Alternative execution also failed:", altError);
+            notification.error("All transaction attempts failed. This token pair may not have a valid pool.");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error executing swap:", error);
+      notification.error(`Failed to execute swap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // Function to execute swap directly through PoolManager
+  const handleDirectSwap = async () => {
+    // Input validation
+    if (!poolManagerAddress || !tokenIn || !tokenOut || !amountIn) {
+      notification.error("Missing swap parameters");
+      return;
+    }
+    
+    // Check if wallet is connected, if not prompt to connect
+    if (!isConnected || !userAddress) {
+      notification.info("Please connect your wallet first");
+      try {
+        openAppKit();
+        return;
+      } catch (error) {
+        console.error("Error opening wallet:", error);
+        notification.error("Could not open wallet connection");
+        return;
+      }
+    }
+    
+    // Check if a transaction is already in progress
+    if (isExecuting) {
+      notification.info("Please wait for the current operation to complete");
+      return;
+    }
+    
+    setIsExecuting(true);
+    
+    try {
+      // Create provider and signer
+      if (!walletProvider) {
+        notification.error("Wallet provider not available");
+        setIsExecuting(false);
+        return;
+      }
+      
+      const provider = new ethers.BrowserProvider(walletProvider);
+      const signer = await provider.getSigner();
+      
+      // Format token addresses
+      const formattedTokenIn = isTokenInNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenIn);
+      const formattedTokenOut = isTokenOutNative ? NATIVE_ETH_ADDRESS : formatAddress(tokenOut);
+      
+      console.log("Formatted addresses:", {
+        tokenIn: formattedTokenIn,
+        tokenOut: formattedTokenOut
+      });
+      
+      // Parse input amount
+      const parsedAmountIn = parseUnits(amountIn, 18);
+      
+      // Sort token addresses (lower address is currency0) for V4 PoolKey
+      const [token0, token1] = [formattedTokenIn, formattedTokenOut].sort((a, b) => 
+        a.toLowerCase() < b.toLowerCase() ? -1 : 1
+      );
+      
+      // We need to determine if we're swapping from token0 to token1 or vice versa
+      const zeroForOne = formattedTokenIn.toLowerCase() === token0.toLowerCase();
+      
+      // Get tick spacing based on selected fee tier
+      const tickSpacing = getTickSpacing(feeTier);
+      
+      // Create the pool key structure
+      const poolKey = {
+        currency0: token0,
+        currency1: token1,
+        fee: feeTier,
+        tickSpacing: tickSpacing,
+        hooks: "0x0000000000000000000000000000000000000000" // No hooks
+      };
+      
+      // Create swap parameters
+      const swapParams = {
+        zeroForOne: zeroForOne,
+        amountSpecified: parsedAmountIn,
+        sqrtPriceLimitX96: zeroForOne ? BigInt(4295128740) : BigInt(1461446703485210103287273052203988822378723970341) // Min/max price limits
+      };
+      
+      // Create PoolManager contract instance
+      const poolManagerContract = new ethers.Contract(poolManagerAddress, POOL_MANAGER_ABI, signer);
+      
+      notification.info("Initiating direct swap through PoolManager...");
+      
+      // For native ETH input, we need to handle this specially
+      if (isTokenInNative) {
+        // First, settle with native ETH (converts to wrapped ETH in the pool manager)
+        notification.info("Settling native ETH...");
+        const settleTx = await poolManagerContract.settle({ value: parsedAmountIn });
+        await settleTx.wait();
+        notification.success("ETH settled successfully");
+      } else {
+        // For ERC20 tokens, we need to approve the PoolManager first
+        // This part would require the ERC20 approval process
+        notification.error("ERC20 swaps directly with PoolManager require additional approval steps - not implemented");
+        setIsExecuting(false);
+        return;
+      }
+      
+      // Execute the swap
+      notification.info("Executing swap...");
+      const swapTx = await poolManagerContract.swap(
+        poolKey,
+        swapParams,
+        "0x" // Empty hook data
+      );
+      
+      console.log("Swap transaction sent:", swapTx.hash);
+      notification.info("Swap transaction sent, waiting for confirmation...");
+      
+      const receipt = await swapTx.wait();
+      console.log("Swap confirmed in block:", receipt.blockNumber);
+      
+      // Now take the output tokens
+      if (isTokenOutNative) {
+        // For native ETH output, we need the WETH address
+        notification.info("Taking ETH...");
+        const takeTx = await poolManagerContract.take(
+          WETH_ADDRESS,
+          userAddress,
+          parsedAmountIn // This is an approximation, should calculate properly
+        );
+        await takeTx.wait();
+        notification.success("ETH received successfully");
+      } else {
+        notification.info("Taking tokens...");
+        const takeTx = await poolManagerContract.take(
+          formattedTokenOut,
+          userAddress,
+          parsedAmountIn // This is an approximation, should calculate properly
+        );
+        await takeTx.wait();
+        notification.success("Tokens received successfully");
+      }
+      
+      notification.success("Direct swap completed successfully!");
+      
+    } catch (error) {
+      console.error("Error executing direct swap:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      
+      if (errorMsg.includes("user rejected") || errorMsg.includes("User denied")) {
+        notification.info("Transaction was rejected in the wallet");
+      } else {
+        notification.error(`Direct swap failed: ${errorMsg.substring(0, 100)}`);
+      }
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // Render Universal Router Interface
+  const renderUniversalRouterInterface = () => {
+    return (
+      <div className="bg-base-100 shadow-xl rounded-3xl p-6 md:p-8 w-full max-w-2xl mx-auto">
+        <h2 className="text-2xl font-bold text-center mb-6 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">Uniswap Universal Router Interface</h2>
+        
+        {/* Protocol selector */}
+        <div className="mb-6">
+          <h3 className="text-md font-medium text-gray-300 mb-2">Swap Protocol</h3>
+          <div className="flex space-x-4">
+            <button
+              className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                !directSwapMode 
+                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+              onClick={() => setDirectSwapMode(false)}
+            >
+              Universal Router
+            </button>
+            <button
+              className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                directSwapMode 
+                  ? 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+              onClick={() => setDirectSwapMode(true)}
+            >
+              Direct Pool Manager
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            {directSwapMode 
+              ? 'Direct swap through Pool Manager - experimental, for advanced users only' 
+              : 'Using Universal Router - the recommended way to swap'}
+          </p>
+          {directSwapMode && !poolManagerAddress && (
+            <p className="mt-2 text-xs text-red-400">
+              Pool Manager address not found. This mode may not be available.
+            </p>
+          )}
+        </div>
+        
+        {/* Swap mode selector - only show if using Universal Router */}
+        {!directSwapMode && (
+          <div className="mb-6">
+            <h3 className="text-md font-medium text-gray-300 mb-2">Swap Protocol Version</h3>
+            <div className="flex space-x-4">
+              <button
+                className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                  swapMode === 'v3' 
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setSwapMode('v3')}
+              >
+                Uniswap V3
+              </button>
+              <button
+                className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                  swapMode === 'v4' 
+                    ? 'bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                onClick={() => setSwapMode('v4')}
+              >
+                Uniswap V4
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-400">
+              {swapMode === 'v3' 
+                ? 'Using Uniswap V3 pools - available on most networks' 
+                : 'Using Uniswap V4 pools - might not be available on all networks'}
+            </p>
+          </div>
+        )}
+        
+        {/* Swap Form */}
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-6">
+            {/* Token Input Form */}
+            <div className="form-control">
+              <label className="label">
+                <span className="label-text text-sm font-medium text-gray-300">From Token</span>
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Token In Address"
+                  className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={tokenIn}
+                  onChange={(e) => setTokenIn(e.target.value)}
+                  disabled={isTokenInNative}
+                />
+                <button
+                  className={`btn rounded-lg shadow-md transition-all duration-200 ${isTokenInNative ? 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setIsTokenInNative(!isTokenInNative);
+                  }}
+                >
+                  ETH
+                </button>
+              </div>
+              {directSwapMode && !isTokenInNative && (
+                <p className="mt-1 text-xs text-yellow-400">
+                  Warning: Direct Pool Manager swaps with ERC20 tokens require additional approval steps.
+                </p>
+              )}
+            </div>
+            
+            {/* Token Output Form */}
+            <div className="form-control">
+              <label className="label">
+                <span className="label-text text-sm font-medium text-gray-300">To Token</span>
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Token Out Address"
+                  className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={tokenOut}
+                  onChange={(e) => setTokenOut(e.target.value)}
+                  disabled={isTokenOutNative}
+                />
+                <button
+                  className={`btn rounded-lg shadow-md transition-all duration-200 ${isTokenOutNative ? 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setIsTokenOutNative(!isTokenOutNative);
+                  }}
+                >
+                  ETH
+                </button>
+              </div>
+            </div>
+            
+            {/* Amount Input */}
+            <div className="form-control">
+              <label className="label">
+                <span className="label-text text-sm font-medium text-gray-300">Amount</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Amount of tokens to swap"
+                className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={amountIn}
+                onChange={(e) => setAmountIn(e.target.value)}
+              />
+            </div>
+            
+            {/* Fee Tier Selection */}
+            <div className="form-control">
+              <label className="label">
+                <span className="label-text text-sm font-medium text-gray-300">Fee Tier</span>
+              </label>
+              <select 
+                className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={feeTier}
+                onChange={(e) => setFeeTier(Number(e.target.value))}
+              >
+                {feeTierOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Deadline Input - only show for Universal Router */}
+            {!directSwapMode && (
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text text-sm font-medium text-gray-300">Deadline (minutes)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Deadline in minutes"
+                  className="w-full p-2 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                />
+              </div>
+            )}
+            
+            {/* Action Buttons */}
+            <div className="flex flex-col md:flex-row gap-4 mt-4">
+              {!directSwapMode ? (
+                // Universal Router buttons
+                <>
+                  <button
+                    className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                      !tokenIn && !isTokenInNative || !tokenOut && !isTokenOutNative || !amountIn
+                      ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                      : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+                    } font-medium text-sm`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      generateRouterCommands();
+                    }}
+                    disabled={!tokenIn && !isTokenInNative || !tokenOut && !isTokenOutNative || !amountIn}
+                  >
+                    Generate Commands
+                  </button>
+                  
+                  <button
+                    className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 flex-1 ${
+                      !commandsHex || isExecuting
+                      ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                      : 'bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white'
+                    } font-medium text-sm`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleExecuteSwap();
+                    }}
+                    disabled={!commandsHex || isExecuting}
+                  >
+                    {isExecuting ? (
+                      <span className="flex items-center justify-center">
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Executing Swap...
+                      </span>
+                    ) : (
+                      "Execute Swap"
+                    )}
+                  </button>
+                </>
+              ) : (
+                // Direct Pool Manager button
+                <button
+                  className={`py-2 px-4 rounded-lg shadow-md transition-all duration-200 w-full ${
+                    !poolManagerAddress || !tokenIn && !isTokenInNative || !tokenOut && !isTokenOutNative || !amountIn || isExecuting || (!isTokenInNative && directSwapMode)
+                    ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                    : 'bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white'
+                  } font-medium text-sm`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleDirectSwap();
+                  }}
+                  disabled={!poolManagerAddress || !tokenIn && !isTokenInNative || !tokenOut && !isTokenOutNative || !amountIn || isExecuting || (!isTokenInNative && directSwapMode)}
+                >
+                  {isExecuting ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Executing Direct Swap...
+                    </span>
+                  ) : (
+                    "Execute Direct Pool Swap"
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Display Generated Commands - only show for Universal Router */}
+        {!directSwapMode && commandsHex && (
+          <div className="mt-4 p-4 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+            <h3 className="text-md font-medium text-gray-300 mb-2">Generated Command Hex</h3>
+            <div className="bg-gray-900/80 rounded-md p-2 overflow-x-auto text-xs text-gray-300 font-mono">
+              {commandsHex}
+            </div>
+            
+            {/* Detailed Decoded Parameters */}
+            {decodedParameters && (
+              <div className="mt-4">
+                <h3 className="text-md font-medium text-gray-300 mb-2">Command Details</h3>
+                <div className="bg-gray-900/80 rounded-md p-3 overflow-x-auto text-xs text-gray-300 font-mono">
+                  <div className="grid grid-cols-1 gap-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Command Type:</span>
+                      <span className="text-green-400">{decodedParameters.commandType}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Deadline:</span>
+                      <span>{decodedParameters.deadline}</span>
+                    </div>
+                    
+                    {/* V4 Specific Parameters */}
+                    {swapMode === 'v4' && decodedParameters.actions && (
+                      <>
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">V4 Actions:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            {decodedParameters.actions.map((action: any, index: number) => (
+                              <div key={index} className="flex justify-between">
+                                <span className="text-gray-400">{action.name}:</span>
+                                <span className="text-blue-400">{action.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">Pool Key:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Currency0:</span>
+                              <span className="text-yellow-400">{decodedParameters.poolKey.currency0.slice(0, 6)}...{decodedParameters.poolKey.currency0.slice(-4)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Currency1:</span>
+                              <span className="text-yellow-400">{decodedParameters.poolKey.currency1.slice(0, 6)}...{decodedParameters.poolKey.currency1.slice(-4)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Fee:</span>
+                              <span>{decodedParameters.poolKey.fee}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">TickSpacing:</span>
+                              <span>{decodedParameters.poolKey.tickSpacing}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">Swap Parameters:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Direction:</span>
+                              <span>{decodedParameters.swapParams.zeroForOne ? 'currency0 → currency1' : 'currency1 → currency0'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Amount In:</span>
+                              <span>{decodedParameters.swapParams.amountIn} ETH</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Min Amount Out:</span>
+                              <span>{decodedParameters.swapParams.amountOutMinimum}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">Settlement:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Token:</span>
+                              <span className="text-yellow-400">{decodedParameters.settle.token.slice(0, 6)}...{decodedParameters.settle.token.slice(-4)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Amount:</span>
+                              <span>{decodedParameters.settle.amount} ETH</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">Take:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Token:</span>
+                              <span className="text-yellow-400">{decodedParameters.take.token.slice(0, 6)}...{decodedParameters.take.token.slice(-4)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Min Amount:</span>
+                              <span>{decodedParameters.take.minimumAmount}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    
+                    {/* V3 Specific Parameters */}
+                    {swapMode === 'v3' && decodedParameters.path && (
+                      <>
+                        <div className="mt-1 pt-1 border-t border-gray-700">
+                          <span className="text-purple-400">V3 Parameters:</span>
+                          <div className="grid grid-cols-1 gap-1 pl-4 mt-1">
+                            <div className="flex flex-col">
+                              <span className="text-gray-400">Path:</span>
+                              <span className="mt-1 text-blue-400">{decodedParameters.path}</span>
+                            </div>
+                            <div className="flex justify-between mt-1">
+                              <span className="text-gray-400">Recipient:</span>
+                              <span className="text-yellow-400">{decodedParameters.recipient.slice(0, 6)}...{decodedParameters.recipient.slice(-4)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Amount In:</span>
+                              <span>{decodedParameters.amountIn} ETH</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Min Amount Out:</span>
+                              <span>{decodedParameters.amountOutMinimum}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Deadline Timestamp:</span>
+                              <span>{decodedParameters.executionDeadline}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Raw Input Parameters */}
+        <h3 className="text-md font-medium text-gray-300 mt-4 mb-2">Raw Input Data</h3>
+        <div className="bg-gray-900/80 rounded-md p-2 overflow-x-auto text-xs text-gray-300 font-mono">
+          {inputsArray.map((input, index) => (
+            <div key={index} className="mb-1 break-all">
+              <span className="text-blue-400 mr-2">Input {index}:</span> {input}
+            </div>
+          ))}
+        </div>
+        
+        {/* Manual Transaction Construction Guide */}
+        <div className="mt-4 bg-gray-900/80 rounded-md p-3">
+          <h3 className="text-md font-medium text-gray-300 mb-2">For Manual Transaction Construction</h3>
+          <div className="grid grid-cols-1 gap-2 text-xs">
+            <div className="flex flex-col">
+              <span className="text-gray-400">Contract Address:</span>
+              <span className="mt-1 text-yellow-400">{contractAddress}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-400">Function Selector:</span>
+              <span className="mt-1">0x3593564c (execute with deadline)</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-400">Alternative Selector:</span>
+              <span className="mt-1">0x47ccca02 (execute without deadline)</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-400">Method Parameters:</span>
+              <span className="mt-1">1. commands (bytes): {commandsHex}</span>
+              <span className="mt-1">2. inputs (bytes[]): [see raw input data]</span>
+              <span className="mt-1">3. deadline (uint256): {deadline ? BigInt(Math.floor(Date.now() / 1000) + Number(deadline) * 60).toString() : ''}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-400">Value to Send:</span>
+              <span className="mt-1 text-green-400">{isTokenInNative ? `${amountIn} ETH` : '0 ETH'}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Connection and Network Status */}
+        <div className="mt-8 pt-4 border-t border-gray-700">
+          <div className="flex justify-between items-center">
+            <div>Wallet: </div>
+            <div>
+              {isConnected ? (
+                <span className="text-green-400">
+                  Connected: {userAddress?.slice(0, 6)}...{userAddress?.slice(-4)}
+                </span>
+              ) : (
+                <button 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openAppKit();
+                  }}
+                  className="text-blue-400 hover:text-blue-300 underline"
+                >
+                  Connect Wallet
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-between items-center mt-1">
+            <div>Network: </div>
+            <div className={currentChainId === targetNetwork.id ? "text-green-400" : "text-yellow-400"}>
+              {currentChainId === targetNetwork.id ? 
+                `✓ ${targetNetwork.name}` : 
+                `⚠️ Wrong Network (Expected: ${targetNetwork.name})`}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render Router Fallback
+  const renderRouterFallback = () => {
+    return (
+      <div className="bg-base-100 shadow-xl rounded-3xl p-6 md:p-8 w-full max-w-2xl mx-auto">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text mb-4">
+            Universal Router Interface
+          </h2>
+          
+          {isLoadingContract ? (
+            <div className="flex flex-col items-center justify-center p-8">
+              <svg className="animate-spin h-8 w-8 text-blue-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <p className="text-gray-300">Loading contracts...</p>
+            </div>
+          ) : (
+            <div className="p-6 rounded-lg bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+              <div className="text-yellow-500 mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <h3 className="text-xl font-medium">Contract Not Found</h3>
+              </div>
+              <p className="text-gray-300 mb-4">
+                Universal Router contract was not found on the current network.
+              </p>
+              <div className="bg-gray-900/80 rounded-md p-4 text-left text-sm text-gray-300 font-mono overflow-x-auto">
+                <div className="mb-2">Network ID: {currentChainId || "Not connected"}</div>
+                <div className="mb-2">Target Network: {targetNetwork.name}</div>
+                {debugInfo && (
+                  <div className="mt-2 border-t border-gray-700 pt-2">
+                    <div className="text-xs">Debug Info:</div>
+                    <pre className="mt-1 text-xs whitespace-pre-wrap">{debugInfo}</pre>
+                  </div>
+                )}
+              </div>
+              
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  openAppKit();
+                }}
+                className="mt-4 py-2 px-4 rounded-lg shadow-md transition-all duration-200 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium text-sm"
+              >
+                Connect Wallet
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Main component render
+  return (
+    <div className="py-8 px-4 sm:px-0">
+      {contractName === 'UniversalRouter' && contractAddress ? (
+        renderUniversalRouterInterface()
+      ) : (
+        renderRouterFallback()
+      )}
+    </div>
+  );
+} 
