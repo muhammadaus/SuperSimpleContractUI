@@ -298,7 +298,7 @@ const executeEIP7702Batch = async () => {
             params: [{
               contractAddress: userAddress,
               data,
-              value: `0x${totalValue.toString(16)}`,
+              value: `0x${totalValue.toString(16)}`, // BigInt already properly converted to hex string
               gas: '0x100000', // 1M gas limit as safety
             }]
           });
@@ -343,7 +343,7 @@ const executeEIP7702Batch = async () => {
               params: [{
                 to: userAddress,
                 data,
-                value: `0x${totalValue.toString(16)}`,
+                value: `0x${totalValue.toString(16)}`, // BigInt already properly converted to hex string
                 gas: '0x100000', // 1M gas limit as safety
                 authorizationList: [authorization]
               }]
@@ -409,6 +409,24 @@ const importPorto = async () => {
   }
 };
 
+// Helper to ensure a value is safe for JSON serialization (handles BigInt)
+const prepareSafeRpcValue = (value: string | bigint | number): string => {
+  if (typeof value === 'bigint') {
+    // Convert BigInt to hex string for RPC calls
+    // Ensure it has 0x prefix for proper Ethereum hex formatting
+    return value === BigInt(0) ? '0x0' : `0x${value.toString(16)}`;
+  } else if (typeof value === 'number') {
+    // Convert number to string
+    return value.toString();
+  } else if (value && value.startsWith && !value.startsWith('0x') && /^[0-9a-f]+$/i.test(value)) {
+    // If it's a hex string without 0x prefix, add it
+    return `0x${value}`;
+  } else {
+    // Return string as is or convert to string if needed
+    return String(value);
+  }
+};
+
 // Helper function to format value for Porto
 const formatValueForPorto = (value: string): string => {
   if (value === '0') return '0x0';
@@ -416,7 +434,7 @@ const formatValueForPorto = (value: string): string => {
     // Parse the value with parseEther and convert to hex
     const parsed = parseEther(value);
     // Use proper hex formatting with 0x prefix 
-    return `0x${parsed.toString(16)}`;
+    return prepareSafeRpcValue(parsed);
   } catch (error) {
     console.warn('Error parsing value:', error);
     return '0x0';
@@ -686,7 +704,7 @@ const executeWithPorto = async (operations: BatchOperation[]) => {
             params: [{
               contractAddress: userAddress,
               data,
-              value: `0x${totalValue.toString(16)}`,
+              value: `0x${totalValue.toString(16)}`, // BigInt already properly converted to hex string
               gas: '0x100000', // 1M gas limit as safety
             }]
           });
@@ -724,7 +742,7 @@ const executeWithPorto = async (operations: BatchOperation[]) => {
               params: [{
                 to: userAddress,
                 data,
-                value: `0x${totalValue.toString(16)}`,
+                value: `0x${totalValue.toString(16)}`, // BigInt already properly converted to hex string
                 gas: '0x100000', // 1M gas limit as safety
                 authorizationList: [authorization]
               }]
@@ -839,33 +857,106 @@ const executeEIP7702WithWebAuthn = async () => {
     const provider = new ethers.BrowserProvider(window.ethereum);
     const signer = await provider.getSigner();
     
-    // Check if the wallet has any WebAuthn capability
+    // Check if WebAuthn is initialized for this account
+    let webAuthnInitialized = false;
     try {
+      // First check if the browser supports WebAuthn
+      if (typeof window.PublicKeyCredential === 'undefined' || 
+          typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable !== 'function') {
+        throw new Error("This browser doesn't support WebAuthn");
+      }
+      
+      // Then check if the wallet supports WebAuthn capabilities
       const capabilities = await window.ethereum.request({
         method: 'wallet_getCapabilities'
       }).catch(() => ({}));
 
-      // Check for WebAuthn or similar capabilities
-      const hasWebAuthn = capabilities && (
+      const hasWebAuthnSupport = capabilities && (
         capabilities.webauthn || 
         capabilities.eip7702 || 
         capabilities.signWithCredential
       );
 
-      if (!hasWebAuthn) {
+      if (!hasWebAuthnSupport) {
         throw new Error("Wallet does not appear to support WebAuthn authentication");
       }
-    } catch (capError) {
-      console.warn("Failed to check wallet capabilities:", capError);
-      // Continue anyway, since the capability check might not be supported
+      
+      // Try to get existing WebAuthn credentials
+      try {
+        const result = await window.ethereum.request({
+          method: 'webauthn_getCredentials',
+          params: [{
+            // If you have chain ID available:
+            // chainId: ...
+          }]
+        });
+        
+        if (result && result.address) {
+          console.info(`Found existing WebAuthn credential for address: ${result.address}`);
+          webAuthnInitialized = true;
+        } else {
+          console.info('No existing WebAuthn credentials found');
+        }
+      } catch (credError) {
+        console.warn('Failed to get WebAuthn credentials:', credError);
+        // This could mean credentials aren't initialized yet
+      }
+      
+      // If not initialized, try to create a new credential
+      if (!webAuthnInitialized) {
+        console.info('Attempting to initialize WebAuthn credentials...');
+        
+        try {
+          const result = await window.ethereum.request({
+            method: 'webauthn_createCredential',
+            params: [{
+              // If you have chain ID available:
+              // chainId: ...
+              rp: {
+                name: 'WebAuthn EIP-7702 Demo',
+                id: window.location.hostname
+              },
+              user: {
+                id: `user-${Date.now()}`, // Generate a simple user ID
+                name: 'EIP-7702 User',
+                displayName: 'WebAuthn User'
+              }
+            }]
+          });
+          
+          if (result && result.address) {
+            console.info(`Created new WebAuthn credential for address: ${result.address}`);
+            webAuthnInitialized = true;
+          } else {
+            throw new Error('Failed to create WebAuthn credential');
+          }
+        } catch (createError) {
+          console.error('Failed to create WebAuthn credential:', createError);
+          throw new Error('Could not initialize WebAuthn credentials. Make sure your wallet supports WebAuthn.');
+        }
+      }
+    } catch (error) {
+      console.warn('WebAuthn capability check failed:', error);
+      throw new Error('WebAuthn setup failed: ' + (error instanceof Error ? error.message : String(error)));
+    }
+    
+    if (!webAuthnInitialized) {
+      throw new Error('WebAuthn initialization required before executing batch operations');
     }
 
-    // Prepare batch operations
-    const batchOperations = operations.map(op => ({
-      to: op.to,
-      data: op.data,
-      value: op.value !== '0' ? ethers.parseEther(op.value) : BigInt(0)
-    }));
+    // Prepare batch operations - IMPORTANT: Convert BigInt to string to avoid serialization issues
+    const batchOperations = operations.map(op => {
+      // Parse the ETH value but convert result to string immediately
+      const parsedValue = op.value !== '0' ? 
+        prepareSafeRpcValue(ethers.parseEther(op.value)) : // Convert BigInt to serializable format
+        '0';
+        
+      return {
+        to: op.to,
+        data: op.data,
+        value: parsedValue // Now a properly serializable value
+      };
+    });
 
     console.info("Prepared batch operations:", batchOperations);
 
@@ -874,6 +965,7 @@ const executeEIP7702WithWebAuthn = async () => {
     try {
       console.info("Attempting to use wallet_sendWithCredential method...");
       
+      // All values are now properly serializable
       const txHash = await window.ethereum.request({
         method: 'wallet_sendWithCredential',
         params: [{
@@ -896,10 +988,26 @@ const executeEIP7702WithWebAuthn = async () => {
     try {
       console.info("Attempting to use webauthn_signAndExecute method...");
       
+      // Ensure operations are properly formatted for serialization
+      const cleanOperations = batchOperations.map(op => ({
+        to: op.to,
+        data: op.data,
+        value: op.value
+      }));
+      
+      // Log the exact request we're making to help debug
+      console.info("webauthn_signAndExecute request:", JSON.stringify({
+        operations: cleanOperations
+      }, (key, value) => {
+        // Special handling during logging to show BigInts if any still exist
+        return typeof value === 'bigint' ? value.toString() : value;
+      }));
+      
+      // All values are now properly serializable
       const txHash = await window.ethereum.request({
         method: 'webauthn_signAndExecute',
         params: [{
-          operations: batchOperations
+          operations: cleanOperations
         }]
       });
       
@@ -911,7 +1019,8 @@ const executeEIP7702WithWebAuthn = async () => {
       
       return true;
     } catch (webauthnError) {
-      console.warn("webauthn_signAndExecute not supported:", webauthnError);
+      console.warn("webauthn_signAndExecute not supported or failed:", webauthnError);
+      console.info("Error details:", JSON.stringify(webauthnError, Object.getOwnPropertyNames(webauthnError)));
     }
 
     // If we couldn't use specific WebAuthn methods, throw an error to fall back to other approaches
@@ -934,48 +1043,9 @@ export const executeBatch = async () => {
   setLoading(true);
   
   try {
-    // First try to use Porto wallet if available
-    const portoSupported = await isPortoAvailable();
-    
-    if (portoSupported) {
-      console.info('Porto wallet detected, attempting to use it for batch execution...');
-      
-      try {
-        const result = await executeWithPorto(operations);
-        
-        if (result) {
-          // If Porto execution successful, we're done
-          console.info('Porto batch execution successful');
-          clearOperations();
-          return;
-        } else {
-          console.info('Porto batch execution not supported for this account, trying WebAuthn...');
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn('Porto batch execution failed:', error);
-        
-        // Check if this is a user rejection
-        if (
-          errorMessage.includes('rejected') || 
-          errorMessage.includes('denied') || 
-          errorMessage.includes('canceled') ||
-          errorMessage.includes('cancelled')
-        ) {
-          alert('Transaction rejected by user');
-          setLoading(false);
-          return; // Don't proceed if user rejected
-        }
-        
-        console.info('Trying WebAuthn fallback after Porto failure...');
-      }
-    } else {
-      console.info('Porto wallet not detected, trying WebAuthn EIP-7702 directly...');
-    }
-    
-    // Try WebAuthn approach
+    // First try WebAuthn approach - now prioritized before Porto
+    console.info('Attempting to execute batch with WebAuthn EIP-7702...');
     try {
-      console.info('Attempting to execute batch with WebAuthn EIP-7702...');
       await executeEIP7702WithWebAuthn();
       console.info('WebAuthn EIP-7702 batch execution completed successfully');
       clearOperations();
@@ -998,14 +1068,52 @@ export const executeBatch = async () => {
       
       // If it's specifically about WebAuthn not being set up, provide a helpful message
       if (webAuthnErrorMessage.includes('No ExperimentDelegation contract found')) {
-        alert('Your wallet does not have WebAuthn credentials set up for EIP-7702. Please set up WebAuthn first.');
-        console.info('Trying standard EIP-7702 approach...');
+        console.info('Your wallet does not have WebAuthn credentials set up for EIP-7702.');
       } else {
-        console.info('WebAuthn EIP-7702 not available, trying standard EIP-7702...');
+        console.info('WebAuthn EIP-7702 not available, trying alternative methods...');
       }
     }
     
-    // Next, try using EIP-7702 with any connected wallet
+    // Next try to use Porto wallet if available
+    const portoSupported = await isPortoAvailable();
+    
+    if (portoSupported) {
+      console.info('Porto wallet detected, attempting to use it for batch execution...');
+      
+      try {
+        const result = await executeWithPorto(operations);
+        
+        if (result) {
+          // If Porto execution successful, we're done
+          console.info('Porto batch execution successful');
+          clearOperations();
+          return;
+        } else {
+          console.info('Porto batch execution not supported for this account, trying standard EIP-7702...');
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.warn('Porto batch execution failed:', error);
+        
+        // Check if this is a user rejection
+        if (
+          errorMessage.includes('rejected') || 
+          errorMessage.includes('denied') || 
+          errorMessage.includes('canceled') ||
+          errorMessage.includes('cancelled')
+        ) {
+          alert('Transaction rejected by user');
+          setLoading(false);
+          return; // Don't proceed if user rejected
+        }
+        
+        console.info('Trying standard EIP-7702 after Porto failure...');
+      }
+    } else {
+      console.info('Porto wallet not detected, trying standard EIP-7702...');
+    }
+    
+    // Next, try using standard EIP-7702 with any connected wallet
     console.info('Attempting to execute batch with standard EIP-7702...');
     
     try {

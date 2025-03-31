@@ -19,6 +19,7 @@
     "@reown/appkit": "^1.7.0",
     "@reown/appkit-adapter-ethers": "^1.7.0",
     "@reown/walletkit": "^1.2.2",
+    "@tanstack/react-query": "^5.13.4",
     "@types/qrcode": "^1.5.5",
     "@walletconnect/core": "^2.19.1",
     "@walletconnect/utils": "^2.19.1",
