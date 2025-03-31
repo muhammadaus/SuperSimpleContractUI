@@ -1,6 +1,7 @@
 import "@/styles/globals.css";
 import type { Metadata } from "next";
 import { AppKitProvider } from "@/components/scaffold-eth/AppKitProvider";
+import { PortoInitializer } from "@/components/porto/PortoInitializer";
 
 export const metadata: Metadata = {
   title: "Pure Contracts",
@@ -16,6 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AppKitProvider>
+          <PortoInitializer />
           {children}
         </AppKitProvider>
       </body>

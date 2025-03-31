@@ -18,15 +18,45 @@ import { setTargetNetwork } from "@/utils/scaffold-eth/networks";
 import { getAllContracts } from "@/utils/scaffold-eth/contractsData";
 import { notification } from "@/utils/scaffold-eth/notification";
 import dynamic from 'next/dynamic';
+import { ethers } from "ethers";
+import { useBatchStore } from "../utils/batch";
+import { BatchPanel } from "../utils/batch";
 
 // Lazy load contract interfaces
-const ERC20Interface = dynamic(() => import('./erc20/interface'), { ssr: false });
-const NFTInterface = dynamic(() => import('./nft/interface'), { ssr: false });
-const WrapInterface = dynamic(() => import('./wrap/interface'), { ssr: false });
-const BridgeInterface = dynamic(() => import('./bridge/interface'), { ssr: false });
-const LiquidityInterface = dynamic(() => import('./liquidity/interface'), { ssr: false });
-const SwapInterface = dynamic(() => import('./swap/interface'), { ssr: false });
-const ReadWriteInterface = dynamic(() => import('./readwrite/interface'), { ssr: false });
+const ERC20Interface = dynamic(() => import('./erc20/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading ERC20 interface...</div>
+});
+
+const NFTInterface = dynamic(() => import('./nft/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading NFT interface...</div>
+});
+
+const WrapInterface = dynamic(() => import('./wrap/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading interface...</div>
+});
+
+const BridgeInterface = dynamic(() => import('./bridge/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading interface...</div>
+});
+
+const LiquidityInterface = dynamic(() => import('./liquidity/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading interface...</div>
+});
+
+const SwapInterface = dynamic(() => import('./swap/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading interface...</div>
+});
+
+const ReadWriteInterface = dynamic(() => import('./readwrite/interface').then(mod => mod.default || mod), { 
+  ssr: false,
+  loading: () => <div>Loading interface...</div>
+});
 
 // Define the chain names type from viem/chains
 type ChainName = keyof typeof viemChains;
@@ -44,6 +74,16 @@ interface ABIFunction {
   inputs: { type: string; name: string }[];
   outputs?: { type: string; name: string }[];
   stateMutability?: string;
+}
+
+// Define the batch operation interface
+interface BatchOperation {
+  type: string;
+  interfaceType: 'erc20' | 'nft' | 'wrap' | 'bridge' | 'liquidity' | 'swap' | 'readwrite';
+  to: string;
+  data: string;
+  value: string;
+  description: string;
 }
 
 const Home: NextPage = () => {
@@ -66,6 +106,9 @@ const Home: NextPage = () => {
   const [parsedAbi, setParsedAbi] = useState<any[]>([]);
   const [showTutorial, setShowTutorial] = useState(true);
   const [contractInterface, setContractInterface] = useState<string | null>(null);
+  
+  // Batch functionality
+  const { addOperation, removeOperation, clearOperations, operations, isLoading: batchIsLoading, showPanel, togglePanel } = useBatchStore();
 
   // Get all chain information
   const chainInfo = useMemo(() => {
@@ -637,6 +680,132 @@ const Home: NextPage = () => {
   console.log("Chain Names:", chainInfo.chains.map(c => c.name));
   console.log("Chain IDs:", chainInfo.chains.map(c => c.id));
 
+  const addToBatch = (operation: BatchOperation) => {
+    // Cast the operation to match the expected type
+    const typedOperation = {
+      ...operation,
+      type: operation.type as 'transfer' | 'approve' | 'call' | 'payable_call',
+      interfaceType: operation.interfaceType as 'erc20' | 'erc721' | 'universalRouter' | 'bridge' | 'liquidityPool' | 'positionManager' | 'wrappableToken' | 'readwrite'
+    };
+    
+    addOperation(typedOperation);
+    notification.success(`Added operation to batch`);
+  };
+
+  const removeFromBatch = (index: number) => {
+    removeOperation(index);
+    notification.info(`Removed operation from batch`);
+  };
+
+  const clearBatch = () => {
+    clearOperations();
+    notification.info(`Cleared all batch operations`);
+  };
+
+  const executeBatch = async () => {
+    if (operations.length === 0) {
+      notification.info("No operations in batch");
+      return;
+    }
+
+    setIsLoading(true);
+    notification.info(`Preparing to execute ${operations.length} operations`);
+
+    try {
+      // Check if wallet is connected
+      if (typeof window === 'undefined' || !window.ethereum) {
+        notification.error("Ethereum provider not available. Please use a Web3 browser.");
+        setIsLoading(false);
+        return;
+      }
+      
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      // Execute each operation sequentially
+      for (let i = 0; i < operations.length; i++) {
+        const operation = operations[i];
+        notification.info(`Processing operation ${i + 1}/${operations.length}: ${operation.description}`);
+
+        try {
+          // Prepare transaction request
+          const txRequest = {
+            to: operation.to,
+            data: operation.data,
+            value: operation.value !== '0' ? ethers.parseEther(operation.value) : BigInt(0),
+          };
+
+          // Estimate gas with a buffer to avoid "out of gas" errors
+          let gasEstimate;
+          try {
+            gasEstimate = await provider.estimateGas({
+              ...txRequest,
+              from: await signer.getAddress(),
+            });
+            // Add 20% buffer
+            gasEstimate = (gasEstimate * BigInt(120)) / BigInt(100);
+          } catch (error) {
+            console.error("Gas estimation failed:", error);
+            
+            // Check for common error causes
+            if (operation.to === await signer.getAddress()) {
+              throw new Error("Cannot send transaction to yourself");
+            }
+            
+            // Attempt to extract revert reason if available
+            const errorMessage = (error as Error).message;
+            if (errorMessage.includes("execution reverted")) {
+              throw new Error(`Transaction would fail: ${errorMessage}`);
+            }
+            
+            // Fall back to default gas limit if estimation fails
+            gasEstimate = BigInt(300000);
+            notification.info(`Could not estimate gas. Using default limit: ${gasEstimate.toString()}`);
+          }
+
+          // Send transaction
+          const tx = await signer.sendTransaction({
+            ...txRequest,
+            gasLimit: gasEstimate,
+          });
+
+          notification.success(`Operation ${i + 1} sent! Transaction hash: ${tx.hash}`);
+          
+          // Wait for confirmation
+          notification.info(`Waiting for confirmation of operation ${i + 1}...`);
+          const receipt = await tx.wait();
+          notification.success(`Operation ${i + 1} confirmed in block ${receipt?.blockNumber}!`);
+          
+        } catch (error) {
+          console.error(`Failed to execute operation ${i + 1}:`, error);
+          notification.error(`Failed to execute operation ${i + 1}: ${(error as Error).message}`);
+          
+          // Ask user if they want to continue with remaining operations
+          if (i < operations.length - 1) {
+            const continueExecution = window.confirm(
+              `Operation ${i + 1} failed. Do you want to continue with the remaining operations?`
+            );
+            
+            if (!continueExecution) {
+              notification.info("Batch execution stopped by user");
+              break;
+            }
+          }
+        }
+      }
+
+      notification.success(`Batch execution completed`);
+      // Clear the batch after successful execution
+      clearBatch();
+      
+    } catch (error) {
+      console.error("Batch execution failed:", error);
+      notification.error(`Batch execution failed: ${(error as Error).message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
       <div className="text-center py-10">
@@ -843,94 +1012,110 @@ const Home: NextPage = () => {
           )}
         </div>
 
-        {/* Right Column - Tutorial or Contract Interface */}
+        {/* Right Column - Interface */}
         <div className="md:w-1/2">
-          {contractInterface ? (
-            <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm overflow-auto">
-              <Suspense fallback={
-                <div className="p-6 text-center">
-                  <div className="flex justify-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-3 h-3 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                  <p className="mt-2">Loading contract interface...</p>
-                </div>
-              }>
-                {contractInterface === 'erc20' && <ERC20Interface />}
-                {contractInterface === 'nft' && <NFTInterface />}
-                {contractInterface === 'wrap' && <WrapInterface />}
-                {contractInterface === 'bridge' && <BridgeInterface />}
-                {contractInterface === 'liquidity' && <LiquidityInterface />}
-                {contractInterface === 'swap' && <SwapInterface />}
-                {contractInterface === 'readwrite' && <ReadWriteInterface />}
-              </Suspense>
-            </div>
-          ) : (
-            <div className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 h-full overflow-auto">
-              <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
-                Getting Started
-              </h2>
-              
-              <div className="space-y-4 text-gray-300">
-                <div>
-                  <h3 className="text-lg font-semibold text-blue-400 mb-2">What is this tool?</h3>
-                  <p>
-                    This interface allows you to interact with any smart contract on EVM-compatible blockchains.
-                    Simply input the contract address and ABI to access read and write functions.
-                  </p>
-                </div>
-                
-                <div>
-                  <h3 className="text-lg font-semibold text-blue-400 mb-2">How to use:</h3>
-                  <ol className="list-decimal pl-5 space-y-2">
-                    <li>Select the appropriate network from the dropdown</li>
-                    <li>Enter the smart contract address</li>
-                    <li>Paste the contract ABI (JSON format)</li>
-                    <li>Click "Load Contract" to interact with the contract</li>
-                  </ol>
-                </div>
-                
-                <div>
-                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Contract types supported:</h3>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li><span className="font-medium">ERC-20 tokens</span> - For standard fungible tokens</li>
-                    <li><span className="font-medium">ERC-721 NFTs</span> - For non-fungible tokens</li>
-                    <li><span className="font-medium">Wrapped tokens</span> - For WETH, wstETH, and similar contracts</li>
-                    <li><span className="font-medium">Bridge contracts</span> - For cross-chain interactions</li>
-                    <li><span className="font-medium">Liquidity pools</span> - For liquidity pool interactions</li>
-                    <li><span className="font-medium">Universal Router</span> - For complex swap workflows</li>
-                    <li><span className="font-medium">General contracts</span> - Any other EVM contract</li>
-                  </ul>
-                </div>
-                
-                <div>
-                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Where to find contract ABI?</h3>
-                  <p>
-                    You can find contract ABIs on:
-                  </p>
-                  <ul className="list-disc pl-5 space-y-1 mt-2">
-                    <li>Etherscan (verified contracts)</li>
-                    <li>Project documentation or GitHub repositories</li>
-                    <li>Directly from smart contract developers</li>
-                  </ul>
-                </div>
-                
-                <div className="mt-6">
-                  <h3 className="text-lg font-semibold text-blue-400 mb-2">Need to deploy a contract?</h3>
-                  <p className="mb-4">
-                    If you need to deploy a smart contract instead of interacting with an existing one:
-                  </p>
-                  <Link 
-                    href="/deploy" 
-                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white text-sm font-medium transition-all duration-200"
-                  >
-                    Go to Contract Deployment →
-                  </Link>
-                </div>
+          <div className="border border-gray-700 rounded-xl bg-gray-800/50 backdrop-blur-sm p-4">
+            {/* Tutorial Section */}
+            {showTutorial && (
+              <div className="prose prose-sm max-w-none prose-invert">
+                <h3 className="text-xl font-bold text-blue-400 mb-4">How to Use</h3>
+                <ol className="list-decimal pl-5 space-y-2">
+                  <li>Enter a valid Ethereum contract address.</li>
+                  <li>Paste the contract ABI in JSON format.</li>
+                  <li>Click "Load Contract" to analyze and interact with the contract.</li>
+                  <li>The app will detect the contract type and show the appropriate interface.</li>
+                  <li>For any contract, you can use the Read/Write interface to access all functions.</li>
+                </ol>
+
+                <h4 className="text-lg font-bold text-blue-400 mt-6 mb-3">Batch Operations</h4>
+                <p>
+                  Pure Contracts allows you to queue multiple operations and execute them in a single batch:
+                </p>
+                <ol className="list-decimal pl-5 space-y-2">
+                  <li>Add operations to your batch using the "Add to Batch" buttons.</li>
+                  <li>Review and manage your batch in the batch panel.</li>
+                  <li>Execute all operations in sequence with a single click.</li>
+                  <li>If an operation fails, you'll have the option to continue or stop.</li>
+                </ol>
+
+                <h4 className="text-lg font-bold text-blue-400 mt-6 mb-3">Contract Types</h4>
+                <p>
+                  The app automatically detects different contract types:
+                </p>
+                <ul className="list-disc pl-5 space-y-2">
+                  <li><span className="font-semibold text-blue-400">ERC20 Tokens:</span> Transfer, approve, check balances.</li>
+                  <li><span className="font-semibold text-blue-400">ERC721 NFTs:</span> View, transfer, and manage NFTs.</li>
+                  <li><span className="font-semibold text-blue-400">Universal Router:</span> Interact with advanced router contracts.</li>
+                  <li><span className="font-semibold text-blue-400">Bridges:</span> Cross-chain bridging operations.</li>
+                  <li><span className="font-semibold text-blue-400">Liquidity Pools:</span> Manage liquidity positions.</li>
+                  <li><span className="font-semibold text-blue-400">Position Managers:</span> Manage NFT positions.</li>
+                  <li><span className="font-semibold text-blue-400">Wrappable Tokens:</span> Wrap and unwrap tokens.</li>
+                </ul>
               </div>
-            </div>
-          )}
+            )}
+
+            {/* Render the selected interface */}
+            {!showTutorial && (
+              <>
+                {contractInterface === 'erc20' && (
+                  <ERC20Interface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'nft' && (
+                  <NFTInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'wrap' && (
+                  <WrapInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'bridge' && (
+                  <BridgeInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'liquidity' && (
+                  <LiquidityInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'swap' && (
+                  <SwapInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+                {contractInterface === 'readwrite' && (
+                  <ReadWriteInterface 
+                    contractAddress={address} 
+                    abi={parsedAbi} 
+                    chainId={selectedNetwork ? parseInt(selectedNetwork.value) : undefined} 
+                    addToBatch={addToBatch} 
+                  />
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -949,6 +1134,8 @@ const Home: NextPage = () => {
           </div>
         </div>
       )}
+
+      <BatchPanel />
     </div>
   );
 };

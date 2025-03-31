@@ -25,13 +25,14 @@
     "ethers": "^6.13.5",
     "nanoid": "^5.1.4",
     "next": "^14.0.4",
+    "porto": "^0.0.18",
     "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.5.2",
     "react-select": "^5.8.0",
-    "viem": "2.13.6",
+    "viem": "^2.24.2",
     "zustand": "^4.1.2"
   },
   "devDependencies": {

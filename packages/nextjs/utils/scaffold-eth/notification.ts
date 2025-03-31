@@ -51,4 +51,11 @@ export const notification = {
     console.log(`🗑️ REMOVED NOTIFICATION: ${id}`);
     // In a real app, you would remove the toast notification
   }
+};
+
+/**
+ * Hook to access notification functions in components
+ */
+export const useNotification = () => {
+  return notification;
 }; 
