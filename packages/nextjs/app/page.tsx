@@ -21,6 +21,7 @@ import dynamic from 'next/dynamic';
 import { ethers } from "ethers";
 import { useBatchStore } from "../utils/batch";
 import { BatchPanel } from "../utils/batch";
+import { TransactionPreview } from "../utils/foundry/TransactionPreview";
 
 // Lazy load contract interfaces
 const ERC20Interface = dynamic(() => import('./erc20/interface').then(mod => mod.default || mod), { 
@@ -109,6 +110,9 @@ const Home: NextPage = () => {
   
   // Batch functionality
   const { addOperation, removeOperation, clearOperations, operations, isLoading: batchIsLoading, showPanel, togglePanel } = useBatchStore();
+
+  // Add state for transaction preview
+  const [showTransactionPreview, setShowTransactionPreview] = useState(false);
 
   // Get all chain information
   const chainInfo = useMemo(() => {
@@ -708,96 +712,18 @@ const Home: NextPage = () => {
       return;
     }
 
+    // Show transaction preview
+    setShowTransactionPreview(true);
+  };
+
+  // Function to handle the actual execution after confirmation
+  const handleExecuteBatch = async () => {
     setIsLoading(true);
-    notification.info(`Preparing to execute ${operations.length} operations`);
-
+    setShowTransactionPreview(false);
+    
     try {
-      // Check if wallet is connected
-      if (typeof window === 'undefined' || !window.ethereum) {
-        notification.error("Ethereum provider not available. Please use a Web3 browser.");
-        setIsLoading(false);
-        return;
-      }
-      
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      // Execute each operation sequentially
-      for (let i = 0; i < operations.length; i++) {
-        const operation = operations[i];
-        notification.info(`Processing operation ${i + 1}/${operations.length}: ${operation.description}`);
-
-        try {
-          // Prepare transaction request
-          const txRequest = {
-            to: operation.to,
-            data: operation.data,
-            value: operation.value !== '0' ? ethers.parseEther(operation.value) : BigInt(0),
-          };
-
-          // Estimate gas with a buffer to avoid "out of gas" errors
-          let gasEstimate;
-          try {
-            gasEstimate = await provider.estimateGas({
-              ...txRequest,
-              from: await signer.getAddress(),
-            });
-            // Add 20% buffer
-            gasEstimate = (gasEstimate * BigInt(120)) / BigInt(100);
-          } catch (error) {
-            console.error("Gas estimation failed:", error);
-            
-            // Check for common error causes
-            if (operation.to === await signer.getAddress()) {
-              throw new Error("Cannot send transaction to yourself");
-            }
-            
-            // Attempt to extract revert reason if available
-            const errorMessage = (error as Error).message;
-            if (errorMessage.includes("execution reverted")) {
-              throw new Error(`Transaction would fail: ${errorMessage}`);
-            }
-            
-            // Fall back to default gas limit if estimation fails
-            gasEstimate = BigInt(300000);
-            notification.info(`Could not estimate gas. Using default limit: ${gasEstimate.toString()}`);
-          }
-
-          // Send transaction
-          const tx = await signer.sendTransaction({
-            ...txRequest,
-            gasLimit: gasEstimate,
-          });
-
-          notification.success(`Operation ${i + 1} sent! Transaction hash: ${tx.hash}`);
-          
-          // Wait for confirmation
-          notification.info(`Waiting for confirmation of operation ${i + 1}...`);
-          const receipt = await tx.wait();
-          notification.success(`Operation ${i + 1} confirmed in block ${receipt?.blockNumber}!`);
-          
-        } catch (error) {
-          console.error(`Failed to execute operation ${i + 1}:`, error);
-          notification.error(`Failed to execute operation ${i + 1}: ${(error as Error).message}`);
-          
-          // Ask user if they want to continue with remaining operations
-          if (i < operations.length - 1) {
-            const continueExecution = window.confirm(
-              `Operation ${i + 1} failed. Do you want to continue with the remaining operations?`
-            );
-            
-            if (!continueExecution) {
-              notification.info("Batch execution stopped by user");
-              break;
-            }
-          }
-        }
-      }
-
-      notification.success(`Batch execution completed`);
-      // Clear the batch after successful execution
-      clearBatch();
-      
+      // We'll rely on the execution logic inside useBatchStore
+      await useBatchStore.getState().executeBatch();
     } catch (error) {
       console.error("Batch execution failed:", error);
       notification.error(`Batch execution failed: ${(error as Error).message}`);
@@ -1136,6 +1062,15 @@ const Home: NextPage = () => {
       )}
 
       <BatchPanel />
+
+      {/* Add the transaction preview component */}
+      <TransactionPreview
+        operations={operations}
+        isOpen={showTransactionPreview}
+        onClose={() => setShowTransactionPreview(false)}
+        onConfirm={handleExecuteBatch}
+        isLoading={isLoading}
+      />
     </div>
   );
 };

@@ -1,0 +1,15 @@
+[profile.default]
+src = 'src'
+out = 'out'
+libs = ['lib']
+evm_version = 'prague'  # Required for EIP-7702
+solc_version = '0.8.23'
+
+[rpc_endpoints]
+anvil = "${ANVIL_RPC_URL:http://localhost:8545}"
+goerli = "${GOERLI_RPC_URL:https://goerli.infura.io/v3/}"
+mainnet = "${MAINNET_RPC_URL:https://mainnet.infura.io/v3/}"
+
+[etherscan]
+goerli = { key = "${ETHERSCAN_API_KEY}" }
+mainnet = { key = "${ETHERSCAN_API_KEY}" } 

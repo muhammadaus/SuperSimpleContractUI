@@ -9,6 +9,8 @@ import {
   custom,
   Address,
 } from 'viem';
+import { extractRawTransactionData } from '../foundry';
+import { notification } from '../scaffold-eth/notification';
 
 // Remove the global declaration that's causing type conflicts
 
@@ -1031,23 +1033,122 @@ const executeEIP7702WithWebAuthn = async () => {
   }
 };
 
-// Standalone action to execute batch operations
+// Add a function to execute batch with Foundry
+const executeFoundryBatch = async () => {
+  const { operations, clearOperations } = useBatchStore.getState();
+  
+  if (operations.length === 0) {
+    throw new Error("No operations in batch");
+  }
+
+  console.info(`Preparing to execute ${operations.length} operations with Foundry (EIP-7702)`);
+
+  try {
+    // Get the private key from environment or prompt
+    let privateKey = '';
+    
+    // In real app you might want to get from a secure source
+    // For development, we ask the user to input it (not secure for production)
+    if (typeof window !== 'undefined') {
+      // For browser environment, show transaction preview and get confirmation
+      const showTransactionPreview = () => {
+        return new Promise<boolean>((resolve) => {
+          // In a real app, you would render the TransactionPreview component
+          // and get user confirmation before proceeding
+
+          // For now, we'll use a simple confirm dialog
+          const { rawTransactions, totalGasEstimate, totalValue } = extractRawTransactionData(operations);
+          
+          const confirmMsg = 
+            `Execute ${operations.length} operations with EIP-7702:\n` +
+            `Total value: ${totalValue}\n` +
+            `Estimated gas: ${totalGasEstimate}\n\n` +
+            `Proceed?`;
+            
+          const confirmed = window.confirm(confirmMsg);
+          resolve(confirmed);
+        });
+      };
+      
+      const confirmed = await showTransactionPreview();
+      if (!confirmed) {
+        throw new Error("User cancelled transaction");
+      }
+      
+      // For demonstration - in a real app you would use a more secure approach
+      privateKey = window.prompt("Enter your private key (for development only):") || '';
+      if (!privateKey) {
+        throw new Error("No private key provided");
+      }
+    }
+    
+    // Call the API to execute the batch with Foundry
+    const response = await fetch('/api/foundry', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        operations,
+        privateKey,
+      }),
+    });
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to execute batch');
+    }
+    
+    console.info('Foundry batch execution completed successfully');
+    console.info('Transaction hashes:', result.data.transactionHashes);
+    
+    return true;
+  } catch (error) {
+    console.error('Error executing Foundry batch:', error);
+    throw error;
+  }
+};
+
+// Update the executeBatch function to try Foundry first
 export const executeBatch = async () => {
   const { operations, setLoading, clearOperations } = useBatchStore.getState();
   
   if (operations.length === 0) {
-    alert("No operations in batch");
+    notification.info("No operations in batch");
     return;
   }
   
   setLoading(true);
   
   try {
-    // First try WebAuthn approach - now prioritized before Porto
+    // First try to use Foundry for EIP-7702 support
+    console.info('Attempting to execute batch with Foundry (EIP-7702)...');
+    
+    try {
+      await executeFoundryBatch();
+      notification.success('Batch execution completed with Foundry (EIP-7702)');
+      clearOperations();
+      return;
+    } catch (foundryError: any) {
+      // Check if this was a user cancellation
+      if (foundryError.message?.includes('cancelled') || 
+          foundryError.message?.includes('canceled') ||
+          foundryError.message?.includes('rejected')) {
+        notification.info('Transaction cancelled by user');
+        return;
+      }
+      
+      console.warn('Foundry execution failed, falling back to alternatives:', foundryError);
+      notification.info('Foundry execution not available, trying alternatives...');
+    }
+    
+    // Then try WebAuthn approach
     console.info('Attempting to execute batch with WebAuthn EIP-7702...');
     try {
       await executeEIP7702WithWebAuthn();
       console.info('WebAuthn EIP-7702 batch execution completed successfully');
+      notification.success('Batch execution completed with WebAuthn EIP-7702');
       clearOperations();
       return;
     } catch (webAuthnError: any) {
@@ -1061,7 +1162,7 @@ export const executeBatch = async () => {
         webAuthnErrorMessage.includes('cancelled') ||
         webAuthnErrorMessage.includes('canceled')
       ) {
-        alert('WebAuthn authentication was rejected by user');
+        notification.info('WebAuthn authentication was rejected by user');
         setLoading(false);
         return;
       }
@@ -1086,6 +1187,7 @@ export const executeBatch = async () => {
         if (result) {
           // If Porto execution successful, we're done
           console.info('Porto batch execution successful');
+          notification.success('Batch execution completed with Porto wallet');
           clearOperations();
           return;
         } else {
@@ -1102,7 +1204,7 @@ export const executeBatch = async () => {
           errorMessage.includes('canceled') ||
           errorMessage.includes('cancelled')
         ) {
-          alert('Transaction rejected by user');
+          notification.info('Transaction rejected by user');
           setLoading(false);
           return; // Don't proceed if user rejected
         }
@@ -1119,6 +1221,7 @@ export const executeBatch = async () => {
     try {
       await executeEIP7702Batch();
       console.info('EIP-7702 batch execution completed successfully');
+      notification.success('Batch execution completed with EIP-7702');
       clearOperations();
       return;
     } catch (error: any) {
@@ -1137,7 +1240,7 @@ export const executeBatch = async () => {
         errorMessage.includes('rejected')
       ) {
         console.info('User rejected the transaction');
-        alert('Transaction rejected by user');
+        notification.info('Transaction rejected by user');
         setLoading(false);
         return; // Don't proceed to sequential transactions if user rejected
       }
@@ -1154,7 +1257,7 @@ export const executeBatch = async () => {
       if (isCompatibilityError) {
         console.info('EIP-7702 appears to be unsupported by this wallet. This is expected since EIP-7702 is new and not widely supported yet.');
         // Display user-friendly notification about EIP-7702 compatibility
-        alert('Your wallet does not support EIP-7702 batch transactions yet. Falling back to regular transactions.');
+        notification.info('Your wallet does not support EIP-7702 batch transactions yet. Falling back to regular transactions.');
       } else {
         console.info('EIP-7702 failed for reasons other than compatibility. Check browser console for details.');
       }
@@ -1165,7 +1268,7 @@ export const executeBatch = async () => {
       try {
         await executeTraditionalBatch();
         console.info('Sequential transactions completed');
-        alert('Batch operations completed successfully using sequential transactions.');
+        notification.success('Batch operations completed successfully using sequential transactions.');
       } catch (seqError: any) {
         console.error('Sequential transactions failed:', seqError);
         
@@ -1178,15 +1281,15 @@ export const executeBatch = async () => {
           seqErrorMsg.includes('cancelled') ||
           seqErrorMsg.includes('user rejected')
         ) {
-          alert('Transaction rejected by user');
+          notification.info('Transaction rejected by user');
         } else {
-          alert(`Failed to execute transactions: ${seqErrorMsg || 'Unknown error'}`);
+          notification.error(`Failed to execute transactions: ${seqErrorMsg || 'Unknown error'}`);
         }
       }
     }
   } catch (error) {
     console.error('Failed to execute batch:', error);
-    alert(`Failed to execute batch: ${(error as Error).message}`);
+    notification.error(`Failed to execute batch: ${(error as Error).message}`);
   } finally {
     setLoading(false);
   }
