@@ -5,7 +5,7 @@ import { isAddress } from 'viem';
 import { ethers } from 'ethers';
 import { encodeFunctionData } from "viem";
 import { AbiFunction, AbiParameter } from "abitype";
-import { notification, useNotification } from '../../../utils/scaffold-eth';
+import { notification } from '../../../utils/scaffold-eth/notification';
 import { FunctionForm } from './FunctionForm';
 import { ContractUI } from './ContractUI';
 import { BatchOperation } from '../../../types/batch';
@@ -26,7 +26,6 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
   const [executeFetching, setExecuteFetching] = useState<boolean>(false);
   const [executeResult, setExecuteResult] = useState<any>();
   const [accountAddress, setAccountAddress] = useState<string | null>(null);
-  const notificationApi = useNotification();
 
   // Check if wallet is connected
   useEffect(() => {
@@ -147,7 +146,7 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
         
         // Fall back to default gas limit
         gasEstimate = BigInt(300000);
-        notificationApi.info(`Could not estimate gas. Using default limit: ${gasEstimate.toString()}`);
+        notification.info(`Could not estimate gas. Using default limit: ${gasEstimate.toString()}`);
       }
 
       // Send transaction
@@ -163,16 +162,16 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
       notification.success("Transaction sent successfully!");
       
       // Wait for confirmation
-      notificationApi.info(`Waiting for confirmation...`);
+      notification.info(`Waiting for confirmation...`);
       const receipt = await tx.wait();
-      notificationApi.success(`Transaction confirmed in block ${receipt?.blockNumber}!`);
+      notification.success(`Transaction confirmed in block ${receipt?.blockNumber}!`);
     } catch (error) {
       console.error("Error executing write function:", error);
       notification.error("Error executing write function: " + (error as Error).message);
     } finally {
       setExecuteFetching(false);
     }
-  }, [selectedFunction, executionData, contractAddress, accountAddress, etherValue, abi, notificationApi]);
+  }, [selectedFunction, executionData, contractAddress, accountAddress, etherValue, abi]);
 
   // Function to add the current operation to batch
   const handleAddToBatch = useCallback(() => {

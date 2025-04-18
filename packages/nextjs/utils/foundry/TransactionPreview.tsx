@@ -23,6 +23,7 @@ export const TransactionPreview: React.FC<TransactionPreviewProps> = ({
     params: Record<string, any> 
   } | null>>([]);
 
+  // Use the safe version of extractRawTransactionData that was exported
   const { rawTransactions, totalGasEstimate, totalValue } = extractRawTransactionData(operations);
 
   // Decode transaction data when component is mounted

@@ -1,15 +1,34 @@
-import { execSync } from 'child_process';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
-import path from 'path';
+// Only import Node.js modules on the server side
+let execSync: any;
+let writeFileSync: any;
+let readFileSync: any;
+let existsSync: any;
+let mkdirSync: any;
+let path: any;
+
+// Only require these modules on the server side
+if (typeof window === 'undefined') {
+  execSync = require('child_process').execSync;
+  const fs = require('fs');
+  writeFileSync = fs.writeFileSync;
+  readFileSync = fs.readFileSync;
+  existsSync = fs.existsSync;
+  mkdirSync = fs.mkdirSync;
+  path = require('path');
+}
+
 import { BatchOperation } from '../../types/batch';
 import { ethers } from 'ethers';
 
 // Define the temporary directory for Foundry files
-const TEMP_DIR = path.join(process.cwd(), 'temp', 'foundry');
+let TEMP_DIR = '';
 
 // Make sure the temp directory exists
-if (typeof window === 'undefined' && !existsSync(TEMP_DIR)) {
-  mkdirSync(TEMP_DIR, { recursive: true });
+if (typeof window === 'undefined') {
+  TEMP_DIR = path.join(process.cwd(), 'temp', 'foundry');
+  if (!existsSync(TEMP_DIR)) {
+    mkdirSync(TEMP_DIR, { recursive: true });
+  }
 }
 
 // Check if Foundry is installed
@@ -214,7 +233,46 @@ export const executeBatchWithFoundry = async (
   }
 };
 
-// Helper to extract raw transaction data for preview
+// Function to decode transaction data for display
+export const decodeTransactionData = async (
+  operation: BatchOperation
+): Promise<{ functionName: string; params: Record<string, any> }> => {
+  try {
+    // Safe client-side implementation that doesn't use Node.js specific modules
+    const to = operation.to;
+    const data = operation.data;
+    
+    // Basic function selector extraction
+    let functionName = 'Unknown Function';
+    let params: Record<string, any> = {};
+    
+    if (data && data.length >= 10) {
+      const selector = data.substring(0, 10);
+      
+      // Basic hardcoded selectors for common functions
+      const knownSelectors: Record<string, string> = {
+        '0xa9059cbb': 'transfer',
+        '0x095ea7b3': 'approve',
+        '0x23b872dd': 'transferFrom',
+        '0x70a08231': 'balanceOf',
+        '0x18160ddd': 'totalSupply',
+        '0xdd62ed3e': 'allowance',
+        '0x42842e0e': 'safeTransferFrom',
+        '0x6352211e': 'ownerOf',
+        '0x01ffc9a7': 'supportsInterface',
+      };
+      
+      functionName = knownSelectors[selector] || `Function (${selector})`;
+    }
+    
+    return { functionName, params };
+  } catch (error) {
+    console.error('Error decoding transaction data:', error);
+    return { functionName: 'Error Decoding', params: {} };
+  }
+};
+
+// Export a client-safe version of extractRawTransactionData for browser use
 export const extractRawTransactionData = (operations: BatchOperation[]): { 
   rawTransactions: {to: string, value: string, data: string, description: string}[],
   totalGasEstimate: string,
@@ -245,30 +303,4 @@ export const extractRawTransactionData = (operations: BatchOperation[]): {
     totalGasEstimate,
     totalValue: totalValue + ' ETH'
   };
-};
-
-// Function to decode transaction data for display
-export const decodeTransactionData = async (
-  operation: BatchOperation
-): Promise<{ functionName: string; params: Record<string, any> }> => {
-  try {
-    // Basic implementation - in a real app, you'd use a more sophisticated approach
-    // with a full ABI parser and decoder
-    const data = operation.data;
-    
-    // Extract function signature (first 4 bytes)
-    const functionSelector = data.slice(0, 10);
-    
-    // For now, just return a simple representation
-    return {
-      functionName: functionSelector,
-      params: { _raw: data.slice(10) }
-    };
-  } catch (error) {
-    console.error('Failed to decode transaction data:', error);
-    return {
-      functionName: 'unknown',
-      params: { _raw: operation.data }
-    };
-  }
 }; 
