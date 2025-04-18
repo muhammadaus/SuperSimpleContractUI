@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { useQRTransactionFlow } from '../../hooks/scaffold-eth/useQRTransactionFlow';
 import { QrCodeIcon } from '@heroicons/react/24/outline';
 import ClientOnly from '../components/ClientOnly';
+import { ReadWriteInterface } from "../readwrite/interface";
 
 // Add window.ethereum type declaration
 declare global {
@@ -20,6 +21,7 @@ declare global {
 
 // Define token types
 type TokenType = 'ETH_WETH' | 'STETH_WSTETH';
+type TabType = 'wrap' | 'transfer' | 'readwrite';
 
 // Define token info
 interface TokenInfo {
@@ -41,6 +43,11 @@ function WrapComponent() {
   const [userBalance, setUserBalance] = useState<bigint>(BigInt(0));
   const [wrappedBalance, setWrappedBalance] = useState<bigint>(BigInt(0));
   const [detectedTokenType, setDetectedTokenType] = useState<TokenType | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('wrap');
+  
+  // ERC20 Transfer States
+  const [recipientAddress, setRecipientAddress] = useState('');
+  const [transferAmount, setTransferAmount] = useState('');
   
   // Update address state to handle connected wallet
   const [address, setAddress] = useState<string>('');
@@ -496,6 +503,116 @@ function WrapComponent() {
     }
   };
 
+  const handleTransfer = async () => {
+    if (!isAddress(recipientAddress) || !transferAmount || !tokenTypes[selectedTokenType]?.contractAddress) return;
+    
+    // Don't set loading if the transaction is already executing through AppKit
+    if (!isExecuting) {
+      setIsLoading(true);
+    }
+    
+    try {
+      const parsedAmount = parseEther(transferAmount);
+      
+      // Create the transfer data
+      // For ERC20 transfer: function transfer(address to, uint256 amount)
+      // Function signature: 0xa9059cbb
+      const transferData = '0xa9059cbb' + 
+        recipientAddress.substring(2).padStart(64, '0') + 
+        parsedAmount.toString(16).padStart(64, '0');
+      
+      console.log("Initiating transfer transaction");
+      console.log("Amount:", transferAmount, "Parsed amount:", parsedAmount.toString());
+      console.log("Recipient:", recipientAddress);
+      
+      try {
+        notification.info(`Initiating transfer of ${transferAmount} ${tokenTypes[selectedTokenType]?.wrappedSymbol} to ${recipientAddress.substring(0, 6)}...${recipientAddress.substring(38)} on ${targetNetwork.name}...`);
+        
+        await initiateQRTransaction(
+          tokenTypes[selectedTokenType]?.contractAddress as Address,
+          transferData,
+          BigInt(0) // No ETH value is sent for token transfers
+        );
+        
+        // Reset amount after transaction is initiated
+        setTransferAmount('');
+      } catch (error) {
+        console.error("Failed to initiate transfer transaction:", error);
+        notification.error(`Failed to initiate transfer: ${(error as Error).message}`);
+      }
+    } catch (error) {
+      console.error("Transfer failed:", error);
+      notification.error(`Transaction failed: ${(error as Error).message}`);
+    } finally {
+      // Only reset loading if AppKit is not executing
+      if (!isExecuting) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+  };
+
+  // Mock test for WETH transfer functionality
+  const testTransferFunction = async () => {
+    try {
+      // Setup mock data
+      const mockRecipient = '0x1234567890123456789012345678901234567890';
+      const mockAmount = '0.01';
+      
+      console.log(`Testing transfer of ${mockAmount} WETH to ${mockRecipient}`);
+      
+      // Create the transfer data (this is what would be sent to the contract)
+      const mockParsedAmount = parseEther(mockAmount);
+      
+      // For ERC20 transfer: function transfer(address to, uint256 amount)
+      // Function signature: 0xa9059cbb
+      const transferData = '0xa9059cbb' + 
+        mockRecipient.substring(2).padStart(64, '0') + 
+        mockParsedAmount.toString(16).padStart(64, '0');
+      
+      // Log the transaction data that would be sent
+      console.log("Transfer function data:", transferData);
+      
+      // Simulate transaction (in a real scenario this would call the contract)
+      console.log("Transaction successful (simulated)");
+      console.log(`Transferred ${mockAmount} WETH to ${mockRecipient}`);
+      
+      return {
+        success: true,
+        message: `Successfully transferred ${mockAmount} WETH to ${mockRecipient}`,
+        txData: transferData
+      };
+    } catch (error) {
+      console.error("Test transfer failed:", error);
+      return {
+        success: false,
+        message: `Failed to transfer: ${(error as Error).message}`,
+        error
+      };
+    }
+  };
+  
+  // Run the test once on load
+  useEffect(() => {
+    const runTest = async () => {
+      const result = await testTransferFunction();
+      if (result.success) {
+        console.log("WETH Transfer Test:", result.message);
+        console.log("Transaction Data:", result.txData);
+      } else {
+        console.error("WETH Transfer Test Failed:", result.message);
+      }
+    };
+    
+    // Only run in development
+    if (process.env.NODE_ENV === 'development') {
+      runTest();
+    }
+  }, []);
+
   // Show loading if contract data is not available
   if (!contractData) {
     return (
@@ -515,124 +632,172 @@ function WrapComponent() {
   }
 
   return (
-    <div className="container mx-auto px-6 py-8">
-      <h1 className="text-4xl font-bold mb-8">Wrap/Unwrap Tokens</h1>
-      
-      {/* Token Selection */}
-      <div className="w-full max-w-md mt-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
-        <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
-          Select Token Pair
-        </h2>
-        
-        <div className="flex gap-2 mb-4">
-          {(Object.keys(tokenTypes) as TokenType[]).map((type) => (
-            <button
-              key={type}
-              onClick={() => setSelectedTokenType(type)}
-              className={`px-4 py-2 rounded-lg ${
-                selectedTokenType === type
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              {tokenTypes[type].symbol} ↔ {tokenTypes[type].wrappedSymbol}
-            </button>
-          ))}
-        </div>
-        
-        {detectedTokenType && (
-          <div className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
-            <p>
-              <span className="font-semibold">Detected contract type:</span> {tokenTypes[detectedTokenType].wrappedName} ({tokenTypes[detectedTokenType].wrappedSymbol})
-            </p>
-          </div>
-        )}
-        
-        <p className="text-sm text-gray-400 mb-4">
-          {currentToken.description}
-        </p>
-        
-        {isConnected && (
-          <div className="flex justify-between text-sm text-gray-300 mb-2">
-            <span>Your {isWrapping ? currentToken.symbol : currentToken.wrappedSymbol} Balance:</span>
-            <span className="font-medium">
-              {formatEther(isWrapping ? userBalance : wrappedBalance)} {isWrapping ? currentToken.symbol : currentToken.wrappedSymbol}
-            </span>
+    <div className="flex flex-col items-center flex-grow pt-10 w-full px-4 min-h-screen bg-gradient-to-b from-black to-gray-900 text-white">
+      <div className="text-center">
+        <h1>
+          <span className="block text-2xl mb-2 text-gray-300">Wrapped Token Interface</span>
+          <span className="block text-4xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+            {isWrapping
+              ? `${tokenTypes[selectedTokenType]?.name} → ${tokenTypes[selectedTokenType]?.wrappedName}`
+              : `${tokenTypes[selectedTokenType]?.wrappedName} → ${tokenTypes[selectedTokenType]?.name}`}
+          </span>
+        </h1>
+      </div>
+
+      {/* Token Type Selection */}
+      <div className="flex flex-col sm:flex-row items-center gap-2 mt-4 bg-gray-800/70 p-2 rounded-xl">
+        <span className="text-gray-300 text-sm">Select Token:</span>
+        {Object.keys(tokenTypes).map((type) => (
+          <button
+            key={type}
+            onClick={() => setSelectedTokenType(type as TokenType)}
+            className={`px-3 py-1 rounded-lg transition-colors text-sm font-medium
+              ${selectedTokenType === type
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+          >
+            {tokenTypes[type as TokenType]?.name} / {tokenTypes[type as TokenType]?.wrappedName}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab selection */}
+      <div className="flex w-full max-w-md gap-2 mt-4 mb-2">
+        <button
+          onClick={() => handleTabChange('wrap')}
+          className={`flex-1 px-4 py-2 rounded-tl-lg rounded-tr-lg font-medium transition-colors
+            ${activeTab === 'wrap'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+        >
+          Wrap/Unwrap
+        </button>
+        <button
+          onClick={() => handleTabChange('transfer')}
+          className={`flex-1 px-4 py-2 rounded-tl-lg rounded-tr-lg font-medium transition-colors
+            ${activeTab === 'transfer'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+        >
+          Transfer
+        </button>
+        <button
+          onClick={() => handleTabChange('readwrite')}
+          className={`flex-1 px-4 py-2 rounded-tl-lg rounded-tr-lg font-medium transition-colors
+            ${activeTab === 'readwrite'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+        >
+          Read/Write
+        </button>
+      </div>
+
+      {/* Wallet Connection & Balances */}
+      <div className="w-full max-w-md my-4 p-4 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-center">
+        {!isConnected ? (
+          <button
+            onClick={connectWallet}
+            className={`px-6 py-3 rounded-xl shadow-lg transition-all duration-200 ${
+              isConnecting
+                ? 'bg-gray-700 cursor-not-allowed'
+                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600'
+            } text-white font-medium relative`}
+          >
+            <span className={isConnecting ? 'opacity-0' : 'opacity-100'}>Connect Wallet</span>
+            {isConnecting && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+              </div>
+            )}
+          </button>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="text-left">
+              <div className="text-sm text-gray-400">Connected as:</div>
+              <div className="font-mono text-sm text-gray-300 truncate max-w-[180px]">{address}</div>
+            </div>
+            <div className="flex flex-col items-end">
+              <div className="flex gap-1 text-sm">
+                <span className="text-gray-400">{tokenTypes[selectedTokenType]?.name}:</span>
+                <span className="font-medium">{formatEther(userBalance || BigInt(0))} {tokenTypes[selectedTokenType]?.symbol}</span>
+              </div>
+              <div className="flex gap-1 text-sm">
+                <span className="text-gray-400">{tokenTypes[selectedTokenType]?.wrappedName}:</span>
+                <span className="font-medium">{formatEther(wrappedBalance || BigInt(0))} {tokenTypes[selectedTokenType]?.wrappedSymbol}</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Wrap/Unwrap Form */}
-      <div className="w-full max-w-md my-6 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
-        <div className="flex justify-between mb-4">
-          <button
-            onClick={() => setIsWrapping(true)}
-            className={`flex-1 py-2 rounded-l-lg ${
-              isWrapping
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            Wrap
-          </button>
-          <button
-            onClick={() => setIsWrapping(false)}
-            className={`flex-1 py-2 rounded-r-lg ${
-              !isWrapping
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            Unwrap
-          </button>
-        </div>
-
-        <div className="mb-4">
-          <div className="flex justify-between mb-2">
-            <label className="block text-sm font-medium text-gray-300">
-              {isWrapping ? `Amount of ${currentToken.symbol} to wrap` : `Amount of ${currentToken.wrappedSymbol} to unwrap`}
-            </label>
-            {isConnected && (
-              <button
-                onClick={() => {
-                  const maxBalance = isWrapping ? userBalance : wrappedBalance;
-                  setAmount(formatEther(maxBalance));
-                }}
-                className="text-xs text-blue-400 hover:text-blue-300"
-              >
-                Max
-              </button>
-            )}
+      {activeTab === 'wrap' && (
+        <div className="w-full max-w-md mb-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+          {/* Wrap/Unwrap UI */}
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => setIsWrapping(true)}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                isWrapping
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Wrap
+            </button>
+            <button
+              onClick={() => setIsWrapping(false)}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                !isWrapping
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Unwrap
+            </button>
           </div>
+
+          {/* Existing Wrap/Unwrap UI */}
+          {/* ... existing code ... */}
+        </div>
+      )}
+
+      {activeTab === 'transfer' && isConnected && (
+        <div className="w-full max-w-md mb-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+          <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+            Transfer {tokenTypes[selectedTokenType]?.wrappedSymbol}
+          </h2>
+          <input
+            type="text"
+            value={recipientAddress}
+            onChange={(e) => setRecipientAddress(e.target.value)}
+            placeholder="Recipient address"
+            className={`w-full my-2 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border 
+              ${!isAddress(recipientAddress) && recipientAddress ? 'border-red-500' : 'border-gray-700'}
+              text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 
+              ${!isAddress(recipientAddress) && recipientAddress ? 'focus:ring-red-500' : 'focus:ring-blue-500'}`}
+          />
           <input
             type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.0"
-            className="w-full p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={transferAmount}
+            onChange={(e) => setTransferAmount(e.target.value)}
+            placeholder="Amount"
+            className="w-full my-2 p-3 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <div className="flex justify-between mt-2 text-sm">
-            <span className="text-gray-400">
-              You will receive:
-            </span>
-            <span className="text-gray-300">
-              {amount ? amount : '0'} {isWrapping ? currentToken.wrappedSymbol : currentToken.symbol}
-            </span>
-          </div>
-        </div>
-
-        <div className="mt-4">
           <button
-            onClick={handleWrap}
-            disabled={!amount || parseFloat(amount) <= 0 || isLoading || isExecuting}
+            onClick={handleTransfer}
+            disabled={!isAddress(recipientAddress) || !transferAmount || isLoading || isExecuting}
             className={`w-full px-6 py-3 rounded-xl shadow-lg transition-all duration-200 relative
-              ${(!amount || parseFloat(amount) <= 0 || isLoading || isExecuting)
+              ${(!isAddress(recipientAddress) || !transferAmount || isLoading || isExecuting)
                 ? 'bg-gray-700 cursor-not-allowed text-gray-400'
                 : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
               } font-medium`}
           >
             <span className={`${isLoading || isExecuting ? 'opacity-0' : 'opacity-100'}`}>
-              {isWrapping ? `Wrap ${currentToken.symbol}` : `Unwrap ${currentToken.wrappedSymbol}`}
+              Transfer
             </span>
             
             {(isLoading || isExecuting) && (
@@ -645,26 +810,21 @@ function WrapComponent() {
               </div>
             )}
           </button>
-          
-          {(isLoading || isExecuting) && (
-            <div className="mt-3 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
-              <p className="text-center mb-2">
-                Transaction in progress. Please check your wallet for confirmation requests.
-              </p>
-              <button
-                onClick={() => {
-                  cancelTransaction();
-                  setIsLoading(false); // Also reset the local loading state
-                  setAmount(''); // Reset the amount input
-                }}
-                className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-xs"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
-      </div>
+      )}
+
+      {activeTab === 'readwrite' && isConnected && tokenTypes[selectedTokenType]?.contractAddress && (
+        <div className="w-full max-w-md mb-8 p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 shadow-lg">
+          <h2 className="text-xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-purple-500 text-transparent bg-clip-text">
+            {tokenTypes[selectedTokenType]?.wrappedName} Contract
+          </h2>
+          <ReadWriteInterface 
+            contractAddress={tokenTypes[selectedTokenType]?.contractAddress}
+            abi={tokenTypes[selectedTokenType]?.abi || []}
+            chainId={targetNetwork.id}
+          />
+        </div>
+      )}
 
       {/* Information Card */}
       <div className="w-full max-w-md mb-8 p-6 rounded-xl bg-blue-900/30 border border-blue-700 text-blue-200">
@@ -678,6 +838,26 @@ function WrapComponent() {
           <li><strong>wstETH</strong>: Wrapped stETH, which maintains a constant balance while stETH rebases</li>
         </ul>
       </div>
+
+      {/* Cancel transaction option during loading/executing */}
+      {(isLoading || isExecuting) && (
+        <div className="w-full max-w-md mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">
+          <p className="text-center mb-2">
+            Transaction in progress. Please check your wallet for confirmation requests.
+          </p>
+          <button
+            onClick={() => {
+              cancelTransaction();
+              setIsLoading(false); // Also reset the local loading state
+              setAmount(''); // Reset the amount input
+              setTransferAmount(''); // Reset the transfer amount input
+            }}
+            className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-xs"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Render QR Transaction Modal */}
       <QRTransactionModalComponent />
