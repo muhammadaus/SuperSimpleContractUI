@@ -10,6 +10,15 @@ import { FunctionForm } from './FunctionForm';
 import { ContractUI } from './ContractUI';
 import { BatchOperation } from '../../../types/batch';
 
+// Define a more complete type that includes all function types
+type ExtendedAbiFunction = AbiFunction | {
+  type: "constructor" | "fallback" | "receive";
+  name?: string;
+  inputs?: { type: string; name: string }[];
+  outputs?: { type: string; name: string }[];
+  stateMutability: string;
+};
+
 export interface ReadWriteInterfaceProps {
   contractAddress: string;
   abi: any[] | [];
@@ -18,9 +27,9 @@ export interface ReadWriteInterfaceProps {
 }
 
 export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }: ReadWriteInterfaceProps) => {
-  const [parsedAbi, setParsedAbi] = useState<AbiFunction[]>([]);
+  const [parsedAbi, setParsedAbi] = useState<ExtendedAbiFunction[]>([]);
   const [activeTab, setActiveTab] = useState<string>("read");
-  const [selectedFunction, setSelectedFunction] = useState<AbiFunction | null>(null);
+  const [selectedFunction, setSelectedFunction] = useState<ExtendedAbiFunction | null>(null);
   const [executionData, setExecutionData] = useState<{ functionName: string; args: any[] } | null>(null);
   const [etherValue, setEtherValue] = useState<string>("");
   const [executeFetching, setExecuteFetching] = useState<boolean>(false);
@@ -62,15 +71,19 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
 
   // Group functions by type (read, write, fallback, constructor, etc)
   const functionsByType = useCallback(() => {
-    const functionTypes: { [key: string]: AbiFunction[] } = {};
+    const functionTypes: { [key: string]: ExtendedAbiFunction[] } = {
+      read: [],
+      write: [],
+      constructor: [],
+      fallback: [], 
+      receive: []
+    };
 
     parsedAbi.forEach((func) => {
       if (func.type === "function") {
         const type = func.stateMutability === "view" || func.stateMutability === "pure" ? "read" : "write";
-        if (!functionTypes[type]) functionTypes[type] = [];
         functionTypes[type].push(func);
       } else if (func.type === "constructor" || func.type === "fallback" || func.type === "receive") {
-        if (!functionTypes[func.type]) functionTypes[func.type] = [];
         functionTypes[func.type].push(func);
       }
     });
@@ -84,7 +97,7 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
       const filteredAbi = abi.filter(
         (item) => item.type === "function" || item.type === "constructor" || item.type === "fallback" || item.type === "receive",
       );
-      setParsedAbi(filteredAbi as AbiFunction[]);
+      setParsedAbi(filteredAbi as unknown as ExtendedAbiFunction[]);
     } catch (error) {
       console.error("Error parsing ABI:", error);
     }
@@ -190,7 +203,7 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
 
       // Create operation description
       const paramDescriptions = executionData.args.map((arg, i) => {
-        const param = selectedFunction.inputs[i];
+        const param = selectedFunction && selectedFunction.inputs && selectedFunction.inputs[i];
         return `${param?.name || `param${i}`}: ${arg.toString()}`;
       }).join(', ');
 
@@ -310,7 +323,7 @@ export const ReadWriteInterface = ({ contractAddress, abi, chainId, addToBatch }
               >
                 <div className="font-medium">{func.name || func.type}</div>
                 <div className="text-xs opacity-70">
-                  {func.inputs.length > 0
+                  {func.inputs && func.inputs.length > 0
                     ? func.inputs.map((input: AbiParameter) => input.type).join(", ")
                     : "No inputs"}
                 </div>
