@@ -1,0 +1,9 @@
+[submodule "packages/nextjs/temp/foundry/lib/forge-std"]
+	path = packages/nextjs/temp/foundry/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "lib/forge-std"]
+	path = lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "anvil-test/lib/forge-std"]
+	path = anvil-test/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
